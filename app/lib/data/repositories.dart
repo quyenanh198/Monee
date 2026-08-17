@@ -32,8 +32,32 @@ Future<void> createManualAccount(
   });
 }
 
+/// Deletes an account. If it was the last account of a Plaid item, also
+/// unlinks the item (removes it at Plaid and deletes our plaid_items row) so
+/// no orphan item keeps syncing.
 Future<void> deleteAccount(SupabaseClient db, String id) async {
+  final row = await db
+      .from('accounts')
+      .select('plaid_item_id')
+      .eq('id', id)
+      .single();
+  final itemId = row['plaid_item_id'] as String?;
+
   await db.from('accounts').delete().eq('id', id);
+
+  if (itemId != null) {
+    final remaining = await db
+        .from('accounts')
+        .select('id')
+        .eq('plaid_item_id', itemId)
+        .limit(1);
+    if (remaining.isEmpty) {
+      final res = await db.functions
+          .invoke('plaid-link', body: {'action': 'unlink', 'item_id': itemId});
+      final data = res.data as Map<String, dynamic>?;
+      if (data?['error'] != null) throw Exception(data!['error']);
+    }
+  }
 }
 
 // ---------------------------------------------------------------- categories
@@ -74,6 +98,13 @@ class TxnFilter {
       );
 }
 
+/// Quotes a user-typed term for a PostgREST `.or()` filter. Without quoting,
+/// commas/parentheses in the input break the filter syntax.
+String _orQuote(String term) {
+  final escaped = term.replaceAll(r'\', r'\\').replaceAll('"', r'\"');
+  return '"%$escaped%"';
+}
+
 final txnFilterProvider = StateProvider<TxnFilter>((_) => const TxnFilter());
 final txnPageSizeProvider = StateProvider<int>((_) => 100);
 
@@ -91,7 +122,8 @@ final transactionsProvider = FutureProvider<List<Txn>>((ref) async {
         .lt('date', isoDate(addMonths(f.month!, 1)));
   }
   if (f.search.isNotEmpty) {
-    q = q.or('merchant_name.ilike.%${f.search}%,description.ilike.%${f.search}%');
+    final term = _orQuote(f.search);
+    q = q.or('merchant_name.ilike.$term,description.ilike.$term');
   }
   final rows = await q.order('date', ascending: false).limit(limit);
   return rows.map(Txn.fromJson).toList();
@@ -107,6 +139,18 @@ final recentTxnsProvider = StreamProvider<List<Txn>>((ref) {
       .order('date')
       .limit(10)
       .map((rows) => rows.map(Txn.fromJson).toList());
+});
+
+/// Transactions for the last 6 calendar months, inclusive of current (reports).
+final sixMonthTxnsProvider = FutureProvider<List<Txn>>((ref) async {
+  final db = ref.watch(supabaseProvider);
+  final from = addMonths(DateTime.now(), -5);
+  final rows = await db
+      .from('transactions')
+      .select()
+      .gte('date', isoDate(from))
+      .order('date');
+  return rows.map(Txn.fromJson).toList();
 });
 
 /// All transactions in one calendar month (dashboard donut, budgets).
@@ -227,5 +271,6 @@ void refreshData(WidgetRef ref) {
   ref.invalidate(accountsProvider);
   ref.invalidate(transactionsProvider);
   ref.invalidate(monthTxnsProvider);
+  ref.invalidate(sixMonthTxnsProvider);
   ref.invalidate(budgetsProvider);
 }

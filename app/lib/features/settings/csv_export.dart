@@ -5,10 +5,14 @@ import '../../models/models.dart';
 
 String _cell(String? v) {
   if (v == null || v.isEmpty) return '';
-  if (v.contains(',') || v.contains('"') || v.contains('\n')) {
-    return '"${v.replaceAll('"', '""')}"';
+  // Spreadsheet formula injection guard: text starting with =, +, -, @ or a
+  // tab would be executed as a formula when the CSV is opened in Excel/Sheets.
+  var s = v;
+  if (RegExp(r'^[=+\-@\t]').hasMatch(s)) s = "'$s";
+  if (s.contains(',') || s.contains('"') || s.contains('\n')) {
+    return '"${s.replaceAll('"', '""')}"';
   }
-  return v;
+  return s;
 }
 
 /// RFC-4180-style CSV. Columns: date, amount, currency, account, category,

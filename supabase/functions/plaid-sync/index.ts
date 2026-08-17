@@ -5,13 +5,15 @@
 //   2. Cron (header x-cron-secret == CRON_SECRET) — syncs every active item daily.
 //      Schedule with pg_cron + pg_net or an external scheduler (see README).
 
-import { adminClient, callerUserId, corsHeaders, json, syncItem } from "../_shared/plaid.ts";
+import { adminClient, callerUserId, corsHeaders, json, safeEqual, syncItem } from "../_shared/plaid.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders() });
 
   const db = adminClient();
-  const isCron = req.headers.get("x-cron-secret") === Deno.env.get("CRON_SECRET");
+  const cronSecret = Deno.env.get("CRON_SECRET");
+  const cronHeader = req.headers.get("x-cron-secret");
+  const isCron = !!cronSecret && !!cronHeader && safeEqual(cronHeader, cronSecret);
   const userId = isCron ? null : await callerUserId(req);
   if (!isCron && !userId) return json({ error: "unauthorized" }, 401);
 

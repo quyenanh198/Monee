@@ -97,6 +97,19 @@ void main() {
       expect(lines[1], contains('Vietcombank'));
       expect(lines[1], contains('Ăn uống'));
     });
+
+    test('neutralizes spreadsheet formula injection in text cells', () {
+      final csv = transactionsToCsv(
+        [txn(amount: 5, merchant: '=HYPERLINK("http://evil")', description: '@cmd')],
+        accountNames: {'acc1': 'A'},
+        categoryNames: {},
+      );
+      final line = csv.trim().split('\n')[1];
+      expect(line, contains("'=HYPERLINK"));
+      expect(line, contains("'@cmd"));
+      // Amount column keeps its numeric sign untouched.
+      expect(line, startsWith('2026-08-15,5.00'));
+    });
   });
 
   group('model parsing', () {

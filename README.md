@@ -18,12 +18,16 @@ Design spec: `docs/superpowers/specs/2026-08-17-monee-mvp-design.md`
 2. Apply migrations, in order, via SQL Editor or `supabase db push`:
    - `supabase/migrations/20260817000000_init.sql`
    - `supabase/migrations/20260817000001_seed_categories.sql`
+   - `supabase/migrations/20260817000002_security_hardening.sql`
 3. Deploy Edge Functions:
    ```bash
    supabase functions deploy plaid-link
-   supabase functions deploy plaid-sync
+   supabase functions deploy plaid-sync --no-verify-jwt
    supabase functions deploy plaid-webhook --no-verify-jwt
    ```
+   `plaid-sync` needs `--no-verify-jwt` because the pg_cron call carries no JWT;
+   the function enforces auth itself (user JWT or `x-cron-secret`). Same for
+   `plaid-webhook` (called by Plaid).
 4. Set function secrets:
    ```bash
    supabase secrets set \
@@ -109,6 +113,12 @@ no native SDK). Finish the flow there, come back, press **Đã xong**.
 - `transactions.amount` follows Plaid: **positive = money out, negative = money in**.
 - Plaid access tokens live only in `plaid_items.access_token`; column-level grants
   prevent clients from ever reading them. All Plaid calls happen in Edge Functions.
+- Link tokens are recorded per user (`link_tokens`, service-role only) so the
+  `complete` step only accepts tokens created by the same signed-in user.
+- RLS validates client-written foreign keys: transactions must reference your own
+  account, accounts your own Plaid item, budgets a system or own category.
+- Deleting the last account of a Plaid item unlinks the item (Plaid `/item/remove`
+  + row cleanup) so no orphan item keeps syncing.
 
 ## Post-MVP hardening (known, intentional deferrals)
 

@@ -5,6 +5,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/formatters.dart';
 import '../../core/theme.dart';
 import '../../data/repositories.dart';
+import '../../models/models.dart';
 import '../../widgets/common.dart';
 import 'budget_logic.dart';
 
@@ -89,7 +90,7 @@ class BudgetsScreen extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref, {
     required DateTime month,
-    required List cats,
+    required List<Category> cats,
     String? categoryId,
     double? current,
     String? budgetId,

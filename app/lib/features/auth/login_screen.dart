@@ -16,16 +16,24 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _isSignUp = false;
   bool _busy = false;
   String? _error;
+  String? _info;
 
   Future<void> _submit() async {
     setState(() {
       _busy = true;
       _error = null;
+      _info = null;
     });
     final auth = ref.read(supabaseProvider).auth;
     try {
       if (_isSignUp) {
-        await auth.signUp(email: _email.text.trim(), password: _password.text);
+        final res = await auth.signUp(
+            email: _email.text.trim(), password: _password.text);
+        if (res.session == null) {
+          // Email confirmation is enabled on the Supabase project.
+          setState(() => _info =
+              'Đã đăng ký — kiểm tra email để xác nhận rồi đăng nhập.');
+        }
       } else {
         await auth.signInWithPassword(
             email: _email.text.trim(), password: _password.text);
@@ -72,6 +80,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   Text(_error!,
                       style:
                           TextStyle(color: Theme.of(context).colorScheme.error)),
+                ],
+                if (_info != null) ...[
+                  const SizedBox(height: 12),
+                  Text(_info!, textAlign: TextAlign.center),
                 ],
                 const SizedBox(height: 16),
                 FilledButton(

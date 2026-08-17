@@ -29,9 +29,32 @@ export async function plaid<T>(path: string, body: Record<string, unknown>): Pro
       ...body,
     }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(`Plaid ${path}: ${data.error_code ?? res.status} ${data.error_message ?? ""}`);
+  // Errors from proxies/outages may be non-JSON — keep the message useful.
+  const text = await res.text();
+  let data: Record<string, unknown> | null = null;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = null;
+  }
+  if (!res.ok) {
+    throw new Error(
+      `Plaid ${path}: ${data?.error_code ?? res.status} ${data?.error_message ?? text.slice(0, 200)}`,
+    );
+  }
+  if (data === null) throw new Error(`Plaid ${path}: non-JSON response (HTTP ${res.status})`);
   return data as T;
+}
+
+/** Constant-time string comparison for shared secrets. */
+export function safeEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const ab = enc.encode(a);
+  const bb = enc.encode(b);
+  if (ab.length !== bb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ab.length; i++) diff |= ab[i] ^ bb[i];
+  return diff === 0;
 }
 
 /** Service-role client — bypasses RLS. Server-side only. */

@@ -114,16 +114,20 @@ class AccountsScreen extends ConsumerWidget {
             FilledButton(
               onPressed: () async {
                 final nav = Navigator.of(ctx);
-                final ok = await plaid.completeLink(link.linkToken);
-                if (ok) {
-                  refreshData(ref);
-                  nav.pop();
-                  messenger.showSnackBar(const SnackBar(
-                      content: Text('Đã liên kết ngân hàng')));
-                } else {
-                  messenger.showSnackBar(const SnackBar(
-                      content:
-                          Text('Chưa xong phiên Link — thử lại sau vài giây')));
+                try {
+                  final ok = await plaid.completeLink(link.linkToken);
+                  if (ok) {
+                    refreshData(ref);
+                    nav.pop();
+                    messenger.showSnackBar(const SnackBar(
+                        content: Text('Đã liên kết ngân hàng')));
+                  } else {
+                    messenger.showSnackBar(const SnackBar(
+                        content: Text(
+                            'Chưa xong phiên Link — thử lại sau vài giây')));
+                  }
+                } catch (e) {
+                  messenger.showSnackBar(SnackBar(content: Text('Lỗi: $e')));
                 }
               },
               child: const Text('Đã xong'),
@@ -197,7 +201,9 @@ class AccountsScreen extends ConsumerWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('Xóa "$name"?'),
-        content: const Text('Mọi giao dịch của tài khoản này cũng bị xóa.'),
+        content: const Text(
+            'Mọi giao dịch của tài khoản này cũng bị xóa. Nếu đây là tài khoản '
+            'cuối cùng của một ngân hàng liên kết, kết nối Plaid cũng được gỡ.'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -212,7 +218,13 @@ class AccountsScreen extends ConsumerWidget {
       ),
     );
     if (ok == true) {
-      await deleteAccount(ref.read(supabaseProvider), id);
+      if (!context.mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      try {
+        await deleteAccount(ref.read(supabaseProvider), id);
+      } catch (e) {
+        messenger.showSnackBar(SnackBar(content: Text('Lỗi: $e')));
+      }
       refreshData(ref);
     }
   }

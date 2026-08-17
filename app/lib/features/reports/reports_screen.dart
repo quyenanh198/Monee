@@ -9,24 +9,12 @@ import '../../models/models.dart';
 import '../../widgets/common.dart';
 import '../budgets/budget_logic.dart';
 
-/// Transactions for the last 6 calendar months (inclusive of current).
-final _sixMonthTxnsProvider = FutureProvider<List<Txn>>((ref) async {
-  final db = ref.watch(supabaseProvider);
-  final from = addMonths(DateTime.now(), -5);
-  final rows = await db
-      .from('transactions')
-      .select()
-      .gte('date', isoDate(from))
-      .order('date');
-  return rows.map(Txn.fromJson).toList();
-});
-
 class ReportsScreen extends ConsumerWidget {
   const ReportsScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final txns = ref.watch(_sixMonthTxnsProvider);
+    final txns = ref.watch(sixMonthTxnsProvider);
     final categories = ref.watch(categoriesProvider);
 
     return Scaffold(
@@ -92,14 +80,19 @@ class ReportsScreen extends ConsumerWidget {
                               bottomTitles: AxisTitles(
                                 sideTitles: SideTitles(
                                   showTitles: true,
-                                  getTitlesWidget: (v, _) => Padding(
-                                    padding: const EdgeInsets.only(top: 4),
-                                    child: Text(
-                                      monthLabel(months[v.toInt()])
-                                          .substring(0, 2),
-                                      style: const TextStyle(fontSize: 11),
-                                    ),
-                                  ),
+                                  getTitlesWidget: (v, _) {
+                                    final i = v.toInt();
+                                    if (i < 0 || i >= months.length) {
+                                      return const SizedBox.shrink();
+                                    }
+                                    return Padding(
+                                      padding: const EdgeInsets.only(top: 4),
+                                      child: Text(
+                                        monthLabel(months[i]).substring(0, 2),
+                                        style: const TextStyle(fontSize: 11),
+                                      ),
+                                    );
+                                  },
                                 ),
                               ),
                             ),

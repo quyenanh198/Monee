@@ -6,6 +6,8 @@
 // POST { action: "complete", link_token, institution_name? }
 //   -> { linked: true, accounts: n }          call after the user finishes Link
 //   -> { linked: false }                      session not finished yet — retry
+// POST { action: "unlink", item_id }          item_id = our plaid_items.id
+//   -> { unlinked: true }                     removes the item at Plaid + our rows
 
 import { adminClient, callerUserId, corsHeaders, json, plaid } from "../_shared/plaid.ts";
 
@@ -30,10 +32,24 @@ Deno.serve(async (req) => {
           hosted_link: {},
         },
       );
+      // Remember who created this token so "complete" can verify ownership.
+      const { error } = await db.from("link_tokens")
+        .insert({ link_token: data.link_token, user_id: userId });
+      if (error) throw new Error(error.message);
       return json({ link_token: data.link_token, hosted_link_url: data.hosted_link_url });
     }
 
     if (body.action === "complete") {
+      if (typeof body.link_token !== "string") return json({ error: "link_token required" }, 400);
+      // Only the user who created the token may complete it — otherwise a
+      // signed-in user could claim someone else's freshly linked item.
+      const { data: owner } = await db.from("link_tokens")
+        .select("link_token")
+        .eq("link_token", body.link_token)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (!owner) return json({ error: "unknown link_token" }, 403);
+
       const info = await plaid<{
         link_sessions?: {
           results?: { item_add_results?: { public_token: string }[] };
@@ -75,7 +91,27 @@ Deno.serve(async (req) => {
         .upsert(rows, { onConflict: "plaid_account_id" });
       if (accErr) throw new Error(accErr.message);
 
+      await db.from("link_tokens").delete().eq("link_token", body.link_token);
       return json({ linked: true, accounts: rows.length });
+    }
+
+    if (body.action === "unlink") {
+      if (typeof body.item_id !== "string") return json({ error: "item_id required" }, 400);
+      const { data: item } = await db.from("plaid_items")
+        .select("id, access_token")
+        .eq("id", body.item_id)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (!item) return json({ error: "item not found" }, 404);
+
+      try {
+        await plaid("/item/remove", { access_token: item.access_token });
+      } catch (_e) {
+        // Item may already be gone at Plaid — still remove our rows.
+      }
+      const { error } = await db.from("plaid_items").delete().eq("id", item.id);
+      if (error) throw new Error(error.message);
+      return json({ unlinked: true });
     }
 
     return json({ error: "unknown action" }, 400);
