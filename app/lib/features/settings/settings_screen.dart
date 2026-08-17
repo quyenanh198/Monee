@@ -1,0 +1,115 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:lucide_icons/lucide_icons.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../data/repositories.dart';
+import '../../models/models.dart';
+import 'csv_export.dart';
+
+const _themeKey = 'monee_theme_mode';
+
+final themeModeProvider =
+    StateNotifierProvider<ThemeModeNotifier, ThemeMode>((_) {
+  return ThemeModeNotifier();
+});
+
+class ThemeModeNotifier extends StateNotifier<ThemeMode> {
+  ThemeModeNotifier() : super(ThemeMode.dark) {
+    _load();
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getString(_themeKey);
+    if (v == 'light') state = ThemeMode.light;
+    if (v == 'system') state = ThemeMode.system;
+  }
+
+  Future<void> set(ThemeMode mode) async {
+    state = mode;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_themeKey, mode.name);
+  }
+}
+
+class SettingsScreen extends ConsumerWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mode = ref.watch(themeModeProvider);
+    final email =
+        ref.watch(supabaseProvider).auth.currentUser?.email ?? '';
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Cài đặt')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Card(
+            child: Column(children: [
+              ListTile(
+                leading: const Icon(LucideIcons.moon),
+                title: const Text('Giao diện'),
+                trailing: SegmentedButton<ThemeMode>(
+                  segments: const [
+                    ButtonSegment(
+                        value: ThemeMode.dark, label: Text('Tối')),
+                    ButtonSegment(
+                        value: ThemeMode.light, label: Text('Sáng')),
+                    ButtonSegment(
+                        value: ThemeMode.system, label: Text('Hệ thống')),
+                  ],
+                  selected: {mode},
+                  onSelectionChanged: (s) =>
+                      ref.read(themeModeProvider.notifier).set(s.first),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(LucideIcons.fileDown),
+                title: const Text('Xuất CSV giao dịch'),
+                subtitle: const Text('Sao chép toàn bộ giao dịch vào clipboard'),
+                onTap: () => _exportCsv(context, ref),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 16),
+          Card(
+            child: ListTile(
+              leading: const Icon(LucideIcons.logOut),
+              title: const Text('Đăng xuất'),
+              subtitle: Text(email),
+              onTap: () => ref.read(supabaseProvider).auth.signOut(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _exportCsv(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final db = ref.read(supabaseProvider);
+    final txRows = await db
+        .from('transactions')
+        .select()
+        .order('date', ascending: false);
+    final accRows = await db.from('accounts').select('id, name');
+    final catRows = await db.from('categories').select('id, name');
+
+    final csv = transactionsToCsv(
+      txRows.map(Txn.fromJson).toList(),
+      accountNames: {
+        for (final r in accRows) r['id'] as String: r['name'] as String
+      },
+      categoryNames: {
+        for (final r in catRows) r['id'] as String: r['name'] as String
+      },
+    );
+    await Clipboard.setData(ClipboardData(text: csv));
+    messenger.showSnackBar(SnackBar(
+        content: Text('Đã sao chép ${txRows.length} giao dịch (CSV)')));
+  }
+}

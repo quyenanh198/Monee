@@ -1,0 +1,20 @@
+# Flutter
+app/.dart_tool/
+app/build/
+app/.flutter-plugins*
+app/.packages
+app/pubspec.lock
+app/android/
+app/ios/
+app/linux/
+app/macos/
+app/windows/
+app/web/
+
+# Supabase local
+supabase/.temp/
+supabase/.branches/
+
+# Env / secrets
+.env
+*.env
