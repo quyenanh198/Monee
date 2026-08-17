@@ -8,8 +8,11 @@ String _cell(String? v) {
   // Spreadsheet formula injection guard: text starting with =, +, -, @ or a
   // tab would be executed as a formula when the CSV is opened in Excel/Sheets.
   var s = v;
-  if (RegExp(r'^[=+\-@\t]').hasMatch(s)) s = "'$s";
-  if (s.contains(',') || s.contains('"') || s.contains('\n')) {
+  if (RegExp(r'^[=+\-@\t\r]').hasMatch(s)) s = "'$s";
+  if (s.contains(',') ||
+      s.contains('"') ||
+      s.contains('\n') ||
+      s.contains('\r')) {
     return '"${s.replaceAll('"', '""')}"';
   }
   return s;

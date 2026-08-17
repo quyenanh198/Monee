@@ -28,7 +28,8 @@ Monee/
 ├─ supabase/
 │  ├─ migrations/
 │  │  ├─ 20260817000000_init.sql          # schema + RLS + index + grants
-│  │  └─ 20260817000001_seed_categories.sql  # 12 category mặc định
+│  │  ├─ 20260817000001_seed_categories.sql  # 12 category mặc định
+│  │  └─ 20260817000002_security_hardening.sql  # link_tokens + siết RLS FK
 │  └─ functions/
 │     ├─ _shared/plaid.ts                 # helper: gọi Plaid, syncItem()
 │     ├─ plaid-link/index.ts              # Hosted Link: create + complete
@@ -68,6 +69,7 @@ Monee/
 - [x] Code MVP hoàn chỉnh, commit local `2e300eb` (branch `main`)
 - [x] Push lên GitHub — branch `claude/code-review-github-commit-nbquvb` (merge vào `main` trên GitHub)
 - [x] Code review toàn bộ MVP (2026-08-17) — kết quả trong nhật ký phiên bên dưới
+- [x] Fix toàn bộ finding + security hardening (2026-08-17): migration 000002, link_tokens, unlink, escape search, CSV guard… Lưu ý: deploy `plaid-sync` với `--no-verify-jwt` (cron không có JWT)
 - [ ] Verify local: `flutter create .` → `flutter pub get` → `flutter analyze` → `flutter test`; `deno check` cho 4 file functions
 - [ ] Tạo Supabase project + chạy 2 migration
 - [ ] Deploy 3 Edge Functions + set secrets (`PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV`, `CRON_SECRET`)
@@ -92,3 +94,4 @@ Schema đã chừa chỗ, chỉ làm khi được yêu cầu:
 |---|---|---|---|
 | 2026-08-17 | Claude chat | Chốt ý tưởng, stack, tên, schema; build toàn bộ MVP (30 file); commit local `2e300eb`; đóng gói `monee-repo.tar.gz` | Push GitHub qua Claude Code; verify flutter analyze/test |
 | 2026-08-17 | Claude Code | Review toàn bộ code; thêm `docs/CONTEXT.md`; push branch `claude/code-review-github-commit-nbquvb`. Phát hiện chính: (1) `plaid-link complete` không kiểm tra link_token thuộc về user gọi; (2) chuỗi search nội suy thẳng vào `.or()` PostgREST — dấu phẩy/ngoặc làm hỏng query; (3) `refreshData` không invalidate `_sixMonthTxnsProvider` (Reports bị stale sau khi sửa giao dịch); (4) xóa account Plaid để lại `plaid_items` mồ côi vẫn sync; (5) lỗi trong nút "Đã xong" của completeLink không được catch. Không phải blocker — chi tiết ở message phiên | Sửa các finding nếu muốn; verify flutter analyze/test; tạo Supabase project |
+| 2026-08-17 | Claude Code | Fix toàn bộ finding + rà bảo mật thêm. Mới phát hiện & sửa: cron pg_cron bị 401 vì `plaid-sync` deploy mặc định verify JWT (→ `--no-verify-jwt`, function tự xác thực); RLS cũ cho client gắn FK vào account/item/category của user khác (→ migration 000002 kiểm tra ownership trong policy, lỗi column-capture `accounts.plaid_item_id` trong subquery đã được security-review bắt và sửa, đã verify trên PG16); so sánh cron secret constant-time; CSV chống formula injection (kể cả `\r`). Đã `deno check` 4 file functions OK. Chưa chạy được `flutter analyze`/`test` (môi trường không có Flutter SDK) | Verify flutter analyze/test local; tạo Supabase project + chạy 3 migration; deploy functions theo README mới |

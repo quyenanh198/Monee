@@ -46,19 +46,22 @@ create policy txn_update on transactions for update
 drop policy acc_all on accounts;
 create policy acc_select on accounts for select using (auth.uid() = user_id);
 create policy acc_delete on accounts for delete using (auth.uid() = user_id);
+-- NB: the outer column must be qualified as accounts.plaid_item_id — inside
+-- the subquery an unqualified plaid_item_id resolves to the inner table's
+-- text column plaid_items.plaid_item_id (uuid = text → migration fails).
 create policy acc_insert on accounts for insert with check (
   auth.uid() = user_id
-  and (plaid_item_id is null or exists (
+  and (accounts.plaid_item_id is null or exists (
         select 1 from plaid_items p
-        where p.id = plaid_item_id and p.user_id = auth.uid()))
+        where p.id = accounts.plaid_item_id and p.user_id = auth.uid()))
 );
 create policy acc_update on accounts for update
   using (auth.uid() = user_id)
   with check (
     auth.uid() = user_id
-    and (plaid_item_id is null or exists (
+    and (accounts.plaid_item_id is null or exists (
           select 1 from plaid_items p
-          where p.id = plaid_item_id and p.user_id = auth.uid()))
+          where p.id = accounts.plaid_item_id and p.user_id = auth.uid()))
   );
 
 -- ----------------------------------------------------------------- budgets
