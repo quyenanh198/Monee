@@ -10,6 +10,9 @@ abstract final class MoneeColors {
   static const darkBackground = Color(0xFF0F172A);
   static const darkSurface = Color(0xFF101A34);
   static const darkBorder = Color(0x14FFFFFF); // white 8%
+  static const lightBackground = Color(0xFFF1F5F9); // slate-100
+  static const lightSurface = Colors.white;
+  static const lightBorder = Color(0x1F000000); // black 12%
 }
 
 ThemeData moneeTheme(Brightness brightness) {
@@ -19,7 +22,8 @@ ThemeData moneeTheme(Brightness brightness) {
     brightness: brightness,
     primary: dark ? MoneeColors.secondary : MoneeColors.primary,
     error: MoneeColors.destructive,
-    surface: dark ? MoneeColors.darkBackground : Colors.white,
+    // Light mode: slate background so white cards read as elevated surfaces.
+    surface: dark ? MoneeColors.darkBackground : MoneeColors.lightBackground,
   );
 
   final text = GoogleFonts.firaSansTextTheme(
@@ -32,12 +36,12 @@ ThemeData moneeTheme(Brightness brightness) {
     scaffoldBackgroundColor: scheme.surface,
     textTheme: text,
     cardTheme: CardTheme(
-      color: dark ? MoneeColors.darkSurface : Colors.white,
+      color: dark ? MoneeColors.darkSurface : MoneeColors.lightSurface,
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: dark ? MoneeColors.darkBorder : Colors.black12,
+          color: dark ? MoneeColors.darkBorder : MoneeColors.lightBorder,
         ),
       ),
       margin: EdgeInsets.zero,
@@ -47,7 +51,7 @@ ThemeData moneeTheme(Brightness brightness) {
       isDense: true,
     ),
     navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: dark ? MoneeColors.darkSurface : Colors.white,
+      backgroundColor: dark ? MoneeColors.darkSurface : MoneeColors.lightSurface,
       indicatorColor: scheme.primary.withValues(alpha: 0.2),
     ),
   );

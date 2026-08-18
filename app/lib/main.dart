@@ -30,7 +30,7 @@ class MoneeApp extends ConsumerWidget {
       theme: moneeTheme(Brightness.light),
       darkTheme: moneeTheme(Brightness.dark),
       themeMode: mode,
-      routerConfig: buildRouter(),
+      routerConfig: ref.watch(routerProvider),
     );
   }
 }

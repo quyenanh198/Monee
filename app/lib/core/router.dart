@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -26,6 +27,11 @@ class _AuthRefresh extends ChangeNotifier {
     super.dispose();
   }
 }
+
+/// Single app-lifetime router. Built once — rebuilding MoneeApp (e.g. on a
+/// theme change) must NOT create a new GoRouter, or navigation state resets
+/// to the initial location and the auth listener leaks.
+final routerProvider = Provider<GoRouter>((_) => buildRouter());
 
 GoRouter buildRouter() {
   return GoRouter(
