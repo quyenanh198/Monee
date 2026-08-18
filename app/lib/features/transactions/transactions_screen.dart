@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/formatters.dart';
+import '../../core/parsing.dart';
 import '../../data/repositories.dart';
 import '../../models/models.dart';
 import '../../widgets/common.dart';
@@ -21,7 +22,7 @@ class TransactionsScreen extends ConsumerWidget {
 
     final accList = accounts.valueOrNull ?? [];
     final catList = categories.valueOrNull ?? [];
-    final catNames = {for (final c in catList) c.id: c.name};
+    final catNames = ref.watch(categoryNamesProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -229,11 +230,13 @@ Future<void> showTxnForm(
                 icon: const Icon(LucideIcons.calendar, size: 18),
                 label: Text(shortDate(date)),
                 onPressed: () async {
+                  final now = DateTime.now();
                   final picked = await showDatePicker(
                     context: ctx,
                     initialDate: date,
                     firstDate: DateTime(2000),
-                    lastDate: DateTime.now(),
+                    // an imported future-dated txn must not crash the picker
+                    lastDate: date.isAfter(now) ? date : now,
                   );
                   if (picked != null) setState(() => date = picked);
                 },
@@ -296,13 +299,19 @@ Future<void> showTxnForm(
           FilledButton(
             onPressed: () async {
               final nav = Navigator.of(ctx);
+              final messenger = ScaffoldMessenger.of(ctx);
               final db = ref.read(supabaseProvider);
               final noteVal = note.text.trim().isEmpty ? null : note.text.trim();
               if (plaidRow) {
                 await updateTxnMeta(db, existing.id,
                     categoryId: categoryId, note: noteVal, tags: parseTags());
               } else {
-                final raw = double.tryParse(amount.text) ?? 0;
+                final raw = parseAmount(amount.text);
+                if (raw == null || raw <= 0) {
+                  messenger.showSnackBar(const SnackBar(
+                      content: Text('Số tiền không hợp lệ — chưa lưu')));
+                  return;
+                }
                 await upsertManualTxn(
                   db,
                   id: existing?.id,
@@ -347,7 +356,7 @@ Future<bool> showSplitDialog(
     builder: (ctx) => StatefulBuilder(
       builder: (ctx, setState) {
         final entered = amounts
-            .map((c) => double.tryParse(c.text) ?? 0)
+            .map((c) => parseAmount(c.text) ?? 0)
             .fold(0.0, (s, v) => s + v);
         final remaining = total - entered;
 
@@ -419,22 +428,27 @@ Future<bool> showSplitDialog(
                   ? null
                   : () async {
                       final nav = Navigator.of(ctx);
+                      final messenger = ScaffoldMessenger.of(ctx);
                       final db = ref.read(supabaseProvider);
                       final parts = <({double amount, String? categoryId})>[
                         for (var i = 0; i < amounts.length; i++)
-                          if ((double.tryParse(amounts[i].text) ?? 0) > 0)
+                          if ((parseAmount(amounts[i].text) ?? 0) > 0)
                             (
-                              amount: sign *
-                                  (double.tryParse(amounts[i].text) ?? 0),
+                              amount: sign * (parseAmount(amounts[i].text) ?? 0),
                               categoryId: catIds[i],
                             ),
                       ];
                       if (parts.length < 2) return;
-                      await unsplitTxn(db, parent.id);
-                      await splitTxn(db, parent, parts);
-                      refreshData(ref);
-                      saved = true;
-                      nav.pop();
+                      try {
+                        // atomic RPC: replaces previous parts, validates sum
+                        await splitTxn(db, parent, parts);
+                        refreshData(ref);
+                        saved = true;
+                        nav.pop();
+                      } catch (e) {
+                        messenger
+                            .showSnackBar(SnackBar(content: Text('Lỗi: $e')));
+                      }
                     },
               child: const Text('Tách'),
             ),

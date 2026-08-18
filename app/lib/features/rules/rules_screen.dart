@@ -20,7 +20,7 @@ class RulesScreen extends ConsumerWidget {
     final rules = ref.watch(rulesProvider);
     final categories = ref.watch(categoriesProvider);
     final catList = categories.valueOrNull ?? <Category>[];
-    final catNames = {for (final c in catList) c.id: c.name};
+    final catNames = ref.watch(categoryNamesProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Rules phân loại tự động')),

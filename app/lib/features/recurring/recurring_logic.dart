@@ -26,13 +26,7 @@ class RecurringItem {
     required this.occurrences,
   });
 
-  DateTime get nextDue => switch (cadence) {
-        Cadence.weekly => lastDate.add(const Duration(days: 7)),
-        Cadence.monthly =>
-          DateTime(lastDate.year, lastDate.month + 1, lastDate.day),
-        Cadence.yearly =>
-          DateTime(lastDate.year + 1, lastDate.month, lastDate.day),
-      };
+  DateTime get nextDue => _advance(lastDate, cadence);
 
   /// Cost normalized to one month.
   double get monthlyCost => switch (cadence) {
@@ -112,10 +106,17 @@ List<RecurringItem> detectRecurring(Iterable<Txn> txns,
 double totalMonthlyCost(Iterable<RecurringItem> items) =>
     items.fold(0.0, (s, i) => s + i.monthlyCost);
 
+/// Month arithmetic that clamps to the target month's last day — otherwise
+/// Jan 31 + 1 month overflows to Mar 3 and skips February entirely.
+DateTime _addMonthsClamped(DateTime d, int months) {
+  final lastDay = DateTime(d.year, d.month + months + 1, 0).day;
+  return DateTime(d.year, d.month + months, d.day > lastDay ? lastDay : d.day);
+}
+
 DateTime _advance(DateTime d, Cadence c) => switch (c) {
       Cadence.weekly => d.add(const Duration(days: 7)),
-      Cadence.monthly => DateTime(d.year, d.month + 1, d.day),
-      Cadence.yearly => DateTime(d.year + 1, d.month, d.day),
+      Cadence.monthly => _addMonthsClamped(d, 1),
+      Cadence.yearly => _addMonthsClamped(d, 12),
     };
 
 /// Projects a balance over the next [days] days by replaying recurring

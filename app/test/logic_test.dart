@@ -88,6 +88,29 @@ void main() {
     });
   });
 
+  group('chainedCarry', () {
+    test('leftover accumulates through consecutive rollover months', () {
+      // Jan: 100, no spend → carry 100. Feb: 100+100−150 → carry 50.
+      expect(
+          chainedCarry([
+            (budget: 100, rollover: true, spent: 0),
+            (budget: 100, rollover: true, spent: 150),
+          ]),
+          50);
+    });
+
+    test('non-rollover month resets the chain; never negative', () {
+      expect(
+          chainedCarry([
+            (budget: 100, rollover: true, spent: 0),
+            (budget: 100, rollover: false, spent: 0),
+          ]),
+          0);
+      expect(chainedCarry([(budget: 100, rollover: true, spent: 500)]), 0);
+      expect(chainedCarry([]), 0);
+    });
+  });
+
   group('detectRecurring', () {
     List<Txn> monthly(String merchant, double amount) => [
           for (var m = 3; m <= 7; m++)
@@ -163,6 +186,17 @@ void main() {
         ...monthly('Spotify', 11.99),
       ]);
       expect(totalMonthlyCost(items), closeTo(27.48, 0.001));
+    });
+
+    test('month-end dates clamp instead of overflowing into the next month',
+        () {
+      final items = detectRecurring([
+        txn(id: 'r1', amount: 900, merchant: 'Rent', date: DateTime(2025, 11, 30)),
+        txn(id: 'r2', amount: 900, merchant: 'Rent', date: DateTime(2025, 12, 31)),
+        txn(id: 'r3', amount: 900, merchant: 'Rent', date: DateTime(2026, 1, 31)),
+      ]);
+      // 2026-01-31 + 1 month must be Feb 28, not Mar 3.
+      expect(items.single.nextDue, DateTime(2026, 2, 28));
     });
 
     test('includeIncome detects recurring income with negative amount', () {
@@ -266,11 +300,31 @@ void main() {
       expect(parseFlexibleDate('not a date'), isNull);
     });
 
+    test('ambiguous dates honor dayFirst; detectDayFirst scans the file', () {
+      expect(parseFlexibleDate('05/03/2026'), DateTime(2026, 5, 3)); // US
+      expect(parseFlexibleDate('05/03/2026', dayFirst: true),
+          DateTime(2026, 3, 5)); // VN
+      expect(detectDayFirst(['05/03/2026', '13/03/2026']), isTrue);
+      expect(detectDayFirst(['05/03/2026', '03/13/2026']), isFalse);
+      expect(detectDayFirst(['05/03/2026']), isNull);
+    });
+
     test('amounts: currency symbols, thousands, parentheses negative', () {
       expect(parseAmount(r'$1,234.56'), 1234.56);
       expect(parseAmount('(12.50)'), -12.50);
       expect(parseAmount('-3'), -3);
       expect(parseAmount('abc'), isNull);
+      expect(parseAmount(''), isNull);
+    });
+
+    test('amounts: VN/EU formats parse correctly', () {
+      expect(parseAmount('1.234,56'), 1234.56);
+      expect(parseAmount('1.234.567'), 1234567);
+      expect(parseAmount('12,5'), 12.5);
+      expect(parseAmount('(1.234,56)'), -1234.56);
+      expect(parseAmount('1,234'), 1234); // US thousands
+      expect(parseAmount('1.234'), 1.234); // single dot stays decimal
+      expect(parseAmount('₫250.000,00'), 250000);
     });
 
     test('mapCsv skips bad rows and can invert sign', () {
@@ -370,6 +424,21 @@ void main() {
       expect(t.title, 'Target');
       expect(t.date, DateTime(2026, 8, 1));
       expect(t.isPending, true);
+    });
+
+    test('Txn.fromJson tolerates realtime payload typing', () {
+      final t = Txn.fromJson({
+        'id': 't2',
+        'account_id': 'a1',
+        'plaid_transaction_id': null,
+        'amount': '12.34', // realtime delivers numeric as string
+        'date': '2026-08-01',
+        'is_pending': 't',
+        'tags': '{an uong,"du lich"}', // Postgres array literal
+      });
+      expect(t.amount, 12.34);
+      expect(t.isPending, true);
+      expect(t.tags, ['an uong', 'du lich']);
     });
 
     test('Account.fromJson: manual when plaid_item_id null', () {

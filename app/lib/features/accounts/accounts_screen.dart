@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/formatters.dart';
 import '../../core/theme.dart';
 import '../../data/repositories.dart';
+import '../../models/models.dart';
 import '../../widgets/common.dart';
 
 class AccountsScreen extends ConsumerWidget {
@@ -14,6 +15,9 @@ class AccountsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final accounts = ref.watch(accountsProvider);
+    final unhealthyItems = (ref.watch(plaidItemsProvider).valueOrNull ?? [])
+        .where((i) => !i.healthy)
+        .toList();
 
     return Scaffold(
       appBar: AppBar(title: const Text('Tài khoản')),
@@ -24,11 +28,18 @@ class AccountsScreen extends ConsumerWidget {
       ),
       body: AsyncBody(
         value: accounts,
-        builder: (list) => list.isEmpty
+        builder: (list) => list.isEmpty && unhealthyItems.isEmpty
             ? const EmptyState('Chưa có tài khoản nào.')
             : ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
+                  for (final item in unhealthyItems)
+                    _ConnectionBanner(
+                      item: item,
+                      onRelogin: () =>
+                          _linkBank(context, ref, updateItemId: item.id),
+                      onRetry: () => _retrySync(context, ref),
+                    ),
                   Card(
                     child: Column(children: [
                       for (final a in list)
@@ -93,18 +104,35 @@ class AccountsScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _linkBank(BuildContext context, WidgetRef ref) async {
+  /// Retry a sync for items in 'error' state (the server retries them too).
+  Future<void> _retrySync(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(plaidServiceProvider).syncNow();
+      messenger.showSnackBar(const SnackBar(content: Text('Đồng bộ xong')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Lỗi: $e')));
+    }
+    refreshData(ref);
+  }
+
+  /// [updateItemId] set = Link update mode: re-authenticate an existing item
+  /// (bank password changed) without losing its accounts and history.
+  Future<void> _linkBank(BuildContext context, WidgetRef ref,
+      {String? updateItemId}) async {
     final plaid = ref.read(plaidServiceProvider);
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final link = await plaid.createHostedLink();
+      final link = await plaid.createHostedLink(itemId: updateItemId);
       await launchUrl(Uri.parse(link.url),
           mode: LaunchMode.externalApplication);
       if (!context.mounted) return;
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Hoàn tất liên kết'),
+          title: Text(updateItemId == null
+              ? 'Hoàn tất liên kết'
+              : 'Hoàn tất đăng nhập lại'),
           content: const Text(
               'Hoàn thành các bước trong trang Plaid vừa mở, rồi bấm "Đã xong".'),
           actions: [
@@ -227,5 +255,54 @@ class AccountsScreen extends ConsumerWidget {
       }
       refreshData(ref);
     }
+  }
+}
+
+/// Health banner for a bank connection that needs attention.
+class _ConnectionBanner extends StatelessWidget {
+  final PlaidItem item;
+  final VoidCallback onRelogin;
+  final VoidCallback onRetry;
+  const _ConnectionBanner(
+      {required this.item, required this.onRelogin, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final name = item.institutionName ?? 'Ngân hàng';
+    final needsRelogin = item.needsRelogin;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+        child: Row(children: [
+          Icon(LucideIcons.alertTriangle,
+              size: 20, color: needsRelogin ? MoneeColors.destructive : null),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                    needsRelogin
+                        ? '$name cần đăng nhập lại'
+                        : '$name gặp lỗi đồng bộ',
+                    style: Theme.of(context).textTheme.titleSmall),
+                Text(
+                  needsRelogin
+                      ? 'Ngân hàng yêu cầu xác thực lại (ví dụ vừa đổi mật khẩu).'
+                      : 'Sẽ tự thử lại ở lần đồng bộ tới — hoặc thử ngay.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          FilledButton(
+            onPressed: needsRelogin ? onRelogin : onRetry,
+            child: Text(needsRelogin ? 'Đăng nhập lại' : 'Thử lại'),
+          ),
+        ]),
+      ),
+    );
   }
 }

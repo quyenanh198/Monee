@@ -24,7 +24,7 @@ class BudgetsScreen extends ConsumerWidget {
     final categories = ref.watch(categoriesProvider);
 
     final catList = categories.valueOrNull ?? [];
-    final catNames = {for (final c in catList) c.id: c.name};
+    final catNames = ref.watch(categoryNamesProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -65,21 +65,33 @@ class BudgetsScreen extends ConsumerWidget {
             return const EmptyState(
                 'Chưa đặt ngân sách cho tháng này. Bấm + để thêm.');
           }
-          // Rollover: leftover from last month's budget for the same
-          // category is added on top of this month's amount.
-          final prevMonth = addMonths(month, -1);
-          final prevSpent = spentByCategory(
-              ref.watch(monthTxnsProvider(prevMonth)).valueOrNull ?? []);
-          final prevBudgets = {
-            for (final b
-                in ref.watch(budgetsProvider(prevMonth)).valueOrNull ?? [])
-              b.categoryId: b.amount,
-          };
-          double carryOf(Budget b) => b.rollover
-              ? rolloverCarry(
-                  prevBudget: prevBudgets[b.categoryId] ?? 0,
-                  prevSpent: prevSpent[b.categoryId] ?? 0)
-              : 0.0;
+          // Rollover: leftover chains through up to 12 previous months
+          // (chainedCarry), so a surplus promised last month is still
+          // honored this month instead of silently evaporating.
+          double carryOf(Budget b) {
+            if (!b.rollover) return 0;
+            final history =
+                <({double budget, bool rollover, double spent})>[];
+            for (var i = 12; i >= 1; i--) {
+              final m = addMonths(month, -i);
+              final bud = (ref.watch(budgetsProvider(m)).valueOrNull ?? [])
+                  .where((x) => x.categoryId == b.categoryId)
+                  .firstOrNull;
+              if (bud == null) {
+                // no budget that month breaks the chain
+                history.add((budget: 0, rollover: false, spent: 0));
+                continue;
+              }
+              final spentThen = spentByCategory(
+                  ref.watch(monthTxnsProvider(m)).valueOrNull ?? []);
+              history.add((
+                budget: bud.amount,
+                rollover: bud.rollover,
+                spent: spentThen[b.categoryId] ?? 0,
+              ));
+            }
+            return chainedCarry(history);
+          }
           final effectiveTotal =
               buds.fold(0.0, (s, b) => s + b.amount + carryOf(b));
 

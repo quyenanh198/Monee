@@ -19,6 +19,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
   String? _accountId;
   List<List<String>>? _rows; // parsed, header included
   CsvMapping? _mapping;
+  bool? _dayFirstChoice; // null = auto-detect from the file
   bool _busy = false;
 
   void _parse() {
@@ -75,8 +76,25 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
     final rows = _rows;
     final mapping = _mapping;
     final header = rows?.first;
-    final mapped = rows != null && mapping != null
-        ? mapCsv(rows.sublist(1), mapping)
+    // Date field order: explicit choice wins, else scan the file (a single
+    // day > 12 anywhere decides), else default to US MM/dd.
+    final detectedDayFirst = rows == null || mapping == null
+        ? null
+        : detectDayFirst(rows
+            .sublist(1)
+            .where((r) => mapping.dateCol < r.length)
+            .map((r) => r[mapping.dateCol]));
+    final effMapping = mapping == null
+        ? null
+        : CsvMapping(
+            dateCol: mapping.dateCol,
+            amountCol: mapping.amountCol,
+            descCol: mapping.descCol,
+            invertSign: mapping.invertSign,
+            dayFirst: _dayFirstChoice ?? detectedDayFirst ?? false,
+          );
+    final mapped = rows != null && effMapping != null
+        ? mapCsv(rows.sublist(1), effMapping)
         : null;
 
     return Scaffold(
@@ -119,6 +137,26 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
               _colDrop('Cột mô tả', mapping.descCol, header,
                   (v) => _remap(descCol: v),
                   allowNone: true),
+              SizedBox(
+                width: 200,
+                child: DropdownButtonFormField<int>(
+                  initialValue: _dayFirstChoice == null
+                      ? 0
+                      : (_dayFirstChoice! ? 2 : 1),
+                  decoration: const InputDecoration(labelText: 'Định dạng ngày'),
+                  items: [
+                    DropdownMenuItem(
+                        value: 0,
+                        child: Text(detectedDayFirst == null
+                            ? 'Tự động'
+                            : 'Tự động (${detectedDayFirst ? 'dd/MM' : 'MM/dd'})')),
+                    const DropdownMenuItem(value: 1, child: Text('MM/dd/yyyy')),
+                    const DropdownMenuItem(value: 2, child: Text('dd/MM/yyyy')),
+                  ],
+                  onChanged: (v) => setState(
+                      () => _dayFirstChoice = v == 0 ? null : v == 2),
+                ),
+              ),
             ]),
             SwitchListTile(
               value: mapping.invertSign,

@@ -21,20 +21,33 @@ Deno.serve(async (req) => {
 
   try {
     if (body.action === "create_hosted_link") {
+      // With item_id (our uuid): Link *update mode* — re-authenticate an
+      // existing item (ITEM_LOGIN_REQUIRED) without touching its data.
+      const params: Record<string, unknown> = {
+        user: { client_user_id: userId },
+        client_name: "Monee",
+        country_codes: ["US"],
+        language: "en",
+        webhook: `${Deno.env.get("SUPABASE_URL")}/functions/v1/plaid-webhook`,
+        hosted_link: {},
+      };
+      let updateItemId: string | null = null;
+      if (typeof body.item_id === "string") {
+        const { data: it } = await db.from("plaid_items")
+          .select("id, access_token")
+          .eq("id", body.item_id).eq("user_id", userId).maybeSingle();
+        if (!it) return json({ error: "item not found" }, 404);
+        params.access_token = it.access_token; // update mode: no products
+        updateItemId = it.id;
+      } else {
+        params.products = ["transactions"];
+      }
       const data = await plaid<{ link_token: string; hosted_link_url: string }>(
-        "/link/token/create", {
-          user: { client_user_id: userId },
-          client_name: "Monee",
-          products: ["transactions"],
-          country_codes: ["US"],
-          language: "en",
-          webhook: `${Deno.env.get("SUPABASE_URL")}/functions/v1/plaid-webhook`,
-          hosted_link: {},
-        },
+        "/link/token/create", params,
       );
       // Remember who created this token so "complete" can verify ownership.
       const { error } = await db.from("link_tokens")
-        .insert({ link_token: data.link_token, user_id: userId });
+        .insert({ link_token: data.link_token, user_id: userId, item_id: updateItemId });
       if (error) throw new Error(error.message);
       return json({ link_token: data.link_token, hosted_link_url: data.hosted_link_url });
     }
@@ -44,11 +57,20 @@ Deno.serve(async (req) => {
       // Only the user who created the token may complete it — otherwise a
       // signed-in user could claim someone else's freshly linked item.
       const { data: owner } = await db.from("link_tokens")
-        .select("link_token")
+        .select("link_token, item_id")
         .eq("link_token", body.link_token)
         .eq("user_id", userId)
         .maybeSingle();
       if (!owner) return json({ error: "unknown link_token" }, 403);
+
+      // Update-mode token: the user re-authenticated an existing item — no
+      // public_token exchange, just bring the item back to life.
+      if (owner.item_id) {
+        await db.from("plaid_items").update({ status: "active" })
+          .eq("id", owner.item_id).eq("user_id", userId);
+        await db.from("link_tokens").delete().eq("link_token", body.link_token);
+        return json({ linked: true, updated: true });
+      }
 
       const info = await plaid<{
         link_sessions?: {

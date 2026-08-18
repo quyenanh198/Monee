@@ -87,6 +87,8 @@ export interface PlaidTxn {
   merchant_name: string | null;
   name: string;
   pending: boolean;
+  /** On a posted txn: the id of the pending txn it replaces. */
+  pending_transaction_id: string | null;
 }
 
 interface Rule {
@@ -120,7 +122,11 @@ export function matchRule(
  * accounts. Pass userId to snapshot one user, omit for everyone (cron).
  */
 export async function snapshotBalances(db: SupabaseClient, userId?: string): Promise<void> {
-  let q = db.from("accounts").select("user_id, current_balance");
+  // USD only: summing mixed currencies produces a meaningless number, and the
+  // ledger currency of the app is USD. Non-USD accounts are excluded from net
+  // worth until real multi-currency accounting lands (deliberate deferral).
+  let q = db.from("accounts").select("user_id, current_balance")
+    .eq("currency", "USD");
   if (userId) q = q.eq("user_id", userId);
   const { data } = await q;
   if (!data?.length) return;
@@ -138,21 +144,86 @@ export async function snapshotBalances(db: SupabaseClient, userId?: string): Pro
 }
 
 /**
+ * When a synced parent's amount changed but its split children still sum to
+ * the old amount, the children are stale: delete them so the parent counts
+ * again as an unsplit txn (the user can re-split with correct numbers).
+ */
+async function repairSplits(db: SupabaseClient, plaidTxnIds: string[]): Promise<void> {
+  if (!plaidTxnIds.length) return;
+  const { data: parents } = await db.from("transactions")
+    .select("id, amount").in("plaid_transaction_id", plaidTxnIds);
+  if (!parents?.length) return;
+  const { data: children } = await db.from("transactions")
+    .select("parent_txn_id, amount").in("parent_txn_id", parents.map((p) => p.id));
+  if (!children?.length) return;
+  const sums = new Map<string, number>();
+  for (const c of children) {
+    sums.set(c.parent_txn_id, (sums.get(c.parent_txn_id) ?? 0) + Number(c.amount));
+  }
+  const broken = parents
+    .filter((p) => sums.has(p.id) && Math.abs(Number(p.amount) - sums.get(p.id)!) > 0.01)
+    .map((p) => p.id);
+  if (broken.length) {
+    await db.from("transactions").delete().in("parent_txn_id", broken);
+  }
+}
+
+/**
  * Run /transactions/sync for one plaid_items row until has_more is false.
- * Upserts transactions (applying the user's categorization rules to new
- * ones), applies removals, updates balances + cursor, writes a sync_log.
+ * - pending→posted transitions migrate the existing row in place, so the
+ *   user's category/note/tags/splits survive (pending_transaction_id link);
+ * - accounts newly added at the bank are created on the fly — a transaction
+ *   for a still-unknown account fails the sync loudly BEFORE the cursor is
+ *   saved, so nothing is ever silently dropped behind the cursor;
+ * - the cursor is saved with compare-and-swap: if a concurrent sync already
+ *   advanced it, this run's (idempotent) writes stand but the cursor is not
+ *   regressed;
+ * - ITEM_LOGIN_REQUIRED maps to status 'login_required' (needs re-auth flow),
+ *   other failures to 'error' (retried by the next cron/manual sync).
  */
 export async function syncItem(
   db: SupabaseClient,
   item: { id: string; user_id: string; access_token: string; sync_cursor: string | null },
 ): Promise<{ added: number; modified: number; removed: number }> {
+  const originalCursor = item.sync_cursor;
   let cursor = item.sync_cursor ?? undefined;
   let added = 0, modified = 0, removed = 0;
 
   // account map: plaid_account_id -> our uuid
-  const { data: accounts } = await db
-    .from("accounts").select("id, plaid_account_id").eq("plaid_item_id", item.id);
-  const accMap = new Map((accounts ?? []).map((a) => [a.plaid_account_id as string, a.id as string]));
+  let accMap = new Map<string, string>();
+  const loadAccounts = async () => {
+    const { data } = await db
+      .from("accounts").select("id, plaid_account_id").eq("plaid_item_id", item.id);
+    accMap = new Map((data ?? []).map((a) => [a.plaid_account_id as string, a.id as string]));
+  };
+  await loadAccounts();
+
+  // The bank can add accounts to an existing item; create them before use.
+  const ensureAccounts = async (accountIds: Iterable<string>) => {
+    if (![...accountIds].some((id) => !accMap.has(id))) return;
+    const acc = await plaid<{ accounts: {
+      account_id: string; name: string; subtype: string | null;
+      balances: { current: number | null; iso_currency_code: string | null };
+    }[] }>("/accounts/get", { access_token: item.access_token });
+    const rows = acc.accounts
+      .filter((a) => !accMap.has(a.account_id))
+      .map((a) => ({
+        user_id: item.user_id,
+        plaid_item_id: item.id,
+        plaid_account_id: a.account_id,
+        name: a.name,
+        type: a.subtype ?? "checking",
+        currency: a.balances.iso_currency_code ?? "USD",
+        current_balance: a.balances.current ?? 0,
+        balance_updated_at: new Date().toISOString(),
+      }));
+    if (rows.length) {
+      const { error } = await db.from("accounts")
+        .upsert(rows, { onConflict: "plaid_account_id" });
+      if (error) throw new Error(error.message);
+    }
+    await loadAccounts();
+  };
 
   // Categorization rules — applied to newly added transactions only, so a
   // user's manual category on an existing row is never overwritten.
@@ -169,6 +240,15 @@ export async function syncItem(
         next_cursor: string; has_more: boolean;
       }>("/transactions/sync", { access_token: item.access_token, cursor, count: 500 });
 
+      const all = [...page.added, ...page.modified];
+      await ensureAccounts(all.map((t) => t.account_id));
+      for (const t of all) {
+        if (!accMap.has(t.account_id)) {
+          // Fail BEFORE the cursor advances — a skipped txn would be lost forever.
+          throw new Error(`unknown Plaid account ${t.account_id}`);
+        }
+      }
+
       const toRow = (t: PlaidTxn) => ({
         user_id: item.user_id,
         account_id: accMap.get(t.account_id),
@@ -181,18 +261,37 @@ export async function syncItem(
         is_pending: t.pending,
       });
 
+      // pending→posted: update the pending row in place under the new txn id,
+      // preserving category/note/tags and split children.
+      const amountChanged: string[] = []; // new plaid ids whose amount may differ
+      const stillNew: PlaidTxn[] = [];
+      for (const t of page.added) {
+        if (t.pending_transaction_id) {
+          const { data: migrated, error } = await db.from("transactions")
+            .update(toRow(t))
+            .eq("plaid_transaction_id", t.pending_transaction_id)
+            .select("id");
+          if (error) throw new Error(error.message);
+          if (migrated?.length) {
+            amountChanged.push(t.transaction_id);
+            continue;
+          }
+        }
+        stillNew.push(t);
+      }
+
       // Batches must have uniform columns: added rows with a rule match carry
       // category_id; everything else omits it so existing categories survive.
       const withCategory: Record<string, unknown>[] = [];
       const withoutCategory: Record<string, unknown>[] = [];
-      for (const t of page.added) {
-        if (!accMap.has(t.account_id)) continue;
+      for (const t of stillNew) {
         const cat = matchRule(rules, t.merchant_name, t.name);
         if (cat) withCategory.push({ ...toRow(t), category_id: cat });
         else withoutCategory.push(toRow(t));
       }
       for (const t of page.modified) {
-        if (accMap.has(t.account_id)) withoutCategory.push(toRow(t));
+        withoutCategory.push(toRow(t));
+        amountChanged.push(t.transaction_id);
       }
       for (const batch of [withCategory, withoutCategory]) {
         if (!batch.length) continue;
@@ -200,11 +299,16 @@ export async function syncItem(
           .upsert(batch, { onConflict: "plaid_transaction_id" });
         if (error) throw new Error(error.message);
       }
+
+      // Deletes: migrated pending ids no longer match (their row now carries
+      // the posted id), so this only removes genuinely removed transactions.
       if (page.removed.length) {
         const { error } = await db.from("transactions").delete()
           .in("plaid_transaction_id", page.removed.map((r) => r.transaction_id));
         if (error) throw new Error(error.message);
       }
+
+      await repairSplits(db, amountChanged);
 
       added += page.added.length;
       modified += page.modified.length;
@@ -213,31 +317,56 @@ export async function syncItem(
       hasMore = page.has_more;
     }
 
-    // Refresh balances.
+    // Refresh balances (concurrently — independent rows).
     const bal = await plaid<{ accounts: { account_id: string; balances: { current: number | null } }[] }>(
       "/accounts/balance/get", { access_token: item.access_token },
     );
-    for (const a of bal.accounts) {
-      const id = accMap.get(a.account_id);
-      if (id && a.balances.current !== null) {
-        await db.from("accounts").update({
-          current_balance: a.balances.current,
-          balance_updated_at: new Date().toISOString(),
-        }).eq("id", id);
-      }
+    await Promise.all(bal.accounts
+      .filter((a) => accMap.has(a.account_id) && a.balances.current !== null)
+      .map((a) => db.from("accounts").update({
+        current_balance: a.balances.current,
+        balance_updated_at: new Date().toISOString(),
+      }).eq("id", accMap.get(a.account_id)!)));
+
+    // Compare-and-swap the cursor: only claim it if no concurrent sync
+    // advanced it since we read it. Our row writes are idempotent upserts,
+    // so losing the race is harmless — just don't regress the cursor.
+    let claim = db.from("plaid_items")
+      .update({ sync_cursor: cursor, status: "active" })
+      .eq("id", item.id);
+    claim = originalCursor === null
+      ? claim.is("sync_cursor", null)
+      : claim.eq("sync_cursor", originalCursor);
+    const { data: claimed, error: claimErr } = await claim.select("id");
+    if (claimErr) throw new Error(claimErr.message);
+    const lostRace = !claimed?.length;
+    if (lostRace) {
+      // Still clear a stale error state; leave the newer cursor alone.
+      await db.from("plaid_items").update({ status: "active" }).eq("id", item.id);
     }
 
-    await db.from("plaid_items").update({ sync_cursor: cursor, status: "active" }).eq("id", item.id);
     await db.from("sync_logs").insert({
       user_id: item.user_id, plaid_item_id: item.id, status: "success",
       txn_added: added, txn_modified: modified, txn_removed: removed,
+      error_message: lostRace ? "concurrent sync won the cursor race" : null,
     });
     return { added, modified, removed };
   } catch (e) {
-    await db.from("plaid_items").update({ status: "error" }).eq("id", item.id);
+    const msg = String(e);
+    if (msg.includes("TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION")) {
+      // Concurrent sync mutated the stream mid-pagination. Benign: nothing
+      // was lost (cursor unsaved, writes idempotent) — the next sync retries.
+      await db.from("sync_logs").insert({
+        user_id: item.user_id, plaid_item_id: item.id, status: "error",
+        error_message: "retryable: " + msg,
+      });
+      return { added, modified, removed };
+    }
+    const status = msg.includes("ITEM_LOGIN_REQUIRED") ? "login_required" : "error";
+    await db.from("plaid_items").update({ status }).eq("id", item.id);
     await db.from("sync_logs").insert({
       user_id: item.user_id, plaid_item_id: item.id, status: "error",
-      error_message: String(e),
+      error_message: msg,
     });
     throw e;
   }

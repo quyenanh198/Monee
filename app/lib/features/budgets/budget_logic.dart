@@ -46,6 +46,24 @@ double rolloverCarry({required double prevBudget, required double prevSpent}) {
   return left > 0 ? left : 0;
 }
 
+/// Carry produced by a chain of months for one category, oldest first: each
+/// rollover month contributes max(0, base + carryIn − spent); a non-rollover
+/// month resets the chain. Returns the carry INTO the month after the last
+/// entry — so leftover promised in month M is still honored in M+1.
+double chainedCarry(
+    List<({double budget, bool rollover, double spent})> history) {
+  var carry = 0.0;
+  for (final h in history) {
+    if (!h.rollover) {
+      carry = 0.0;
+      continue;
+    }
+    final left = h.budget + carry - h.spent;
+    carry = left > 0 ? left : 0.0;
+  }
+  return carry;
+}
+
 /// Budget progress in [0, 1]; a zero budget with any spend counts as fully used.
 double budgetProgress(double spent, double budget) {
   if (budget <= 0) return spent > 0 ? 1 : 0;

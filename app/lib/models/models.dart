@@ -1,6 +1,33 @@
 /// Plain data models mapping Supabase rows. Sign convention (Plaid):
 /// amount > 0 = money out (expense), amount < 0 = money in (income).
+///
+/// Parsing is deliberately tolerant: REST returns numerics as JSON numbers,
+/// but Realtime change payloads deliver numeric columns as strings and
+/// text[] as a Postgres array literal — both must decode identically or the
+/// dashboard stream dies exactly on the cross-device update it exists for.
 library;
+
+double _toDouble(dynamic v) =>
+    v is num ? v.toDouble() : double.parse(v.toString());
+
+double _toDoubleOr(dynamic v, double fallback) =>
+    v == null ? fallback : _toDouble(v);
+
+bool _toBool(dynamic v) => v == true || v == 'true' || v == 't';
+
+List<String> _toTags(dynamic v) {
+  if (v is List) return v.cast<String>();
+  if (v is String && v.startsWith('{') && v.endsWith('}')) {
+    final inner = v.substring(1, v.length - 1);
+    if (inner.isEmpty) return const [];
+    return inner
+        .split(',')
+        .map((t) => t.replaceAll('"', '').trim())
+        .where((t) => t.isNotEmpty)
+        .toList();
+  }
+  return const [];
+}
 
 class Account {
   final String id;
@@ -29,7 +56,7 @@ class Account {
         name: j['name'] as String,
         type: j['type'] as String? ?? 'checking',
         currency: j['currency'] as String? ?? 'USD',
-        currentBalance: (j['current_balance'] as num?)?.toDouble() ?? 0,
+        currentBalance: _toDoubleOr(j['current_balance'], 0),
         balanceUpdatedAt: j['balance_updated_at'] == null
             ? null
             : DateTime.parse(j['balance_updated_at'] as String),
@@ -76,15 +103,15 @@ class Txn {
         id: j['id'] as String,
         accountId: j['account_id'] as String,
         plaidTransactionId: j['plaid_transaction_id'] as String?,
-        amount: (j['amount'] as num).toDouble(),
+        amount: _toDouble(j['amount']),
         currency: j['currency'] as String? ?? 'USD',
         date: DateTime.parse(j['date'] as String),
         merchantName: j['merchant_name'] as String?,
         description: j['description'] as String?,
         categoryId: j['category_id'] as String?,
-        isPending: j['is_pending'] as bool? ?? false,
+        isPending: _toBool(j['is_pending']),
         note: j['note'] as String?,
-        tags: (j['tags'] as List?)?.cast<String>() ?? const [],
+        tags: _toTags(j['tags']),
         parentTxnId: j['parent_txn_id'] as String?,
       );
 }
@@ -131,8 +158,8 @@ class Budget {
         id: j['id'] as String,
         categoryId: j['category_id'] as String,
         month: DateTime.parse(j['month'] as String),
-        amount: (j['amount'] as num).toDouble(),
-        rollover: j['rollover'] as bool? ?? false,
+        amount: _toDouble(j['amount']),
+        rollover: _toBool(j['rollover']),
       );
 }
 
@@ -177,12 +204,33 @@ class Goal {
   factory Goal.fromJson(Map<String, dynamic> j) => Goal(
         id: j['id'] as String,
         name: j['name'] as String,
-        targetAmount: (j['target_amount'] as num).toDouble(),
-        savedAmount: (j['saved_amount'] as num?)?.toDouble() ?? 0,
+        targetAmount: _toDouble(j['target_amount']),
+        savedAmount: _toDoubleOr(j['saved_amount'], 0),
         accountId: j['account_id'] as String?,
         targetDate: j['target_date'] == null
             ? null
             : DateTime.parse(j['target_date'] as String),
+      );
+}
+
+class PlaidItem {
+  final String id;
+  final String? institutionName;
+  final String status; // active | error | login_required | disconnected
+
+  const PlaidItem({
+    required this.id,
+    required this.institutionName,
+    required this.status,
+  });
+
+  bool get needsRelogin => status == 'login_required';
+  bool get healthy => status == 'active';
+
+  factory PlaidItem.fromJson(Map<String, dynamic> j) => PlaidItem(
+        id: j['id'] as String,
+        institutionName: j['institution_name'] as String?,
+        status: j['status'] as String? ?? 'active',
       );
 }
 
@@ -194,6 +242,6 @@ class BalanceSnapshot {
 
   factory BalanceSnapshot.fromJson(Map<String, dynamic> j) => BalanceSnapshot(
         date: DateTime.parse(j['date'] as String),
-        total: (j['total'] as num).toDouble(),
+        total: _toDouble(j['total']),
       );
 }

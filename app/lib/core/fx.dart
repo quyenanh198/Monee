@@ -52,8 +52,8 @@ final vndRateProvider = FutureProvider<double?>((ref) async {
   }
 });
 
+final NumberFormat _vndFormat =
+    NumberFormat.currency(locale: 'vi', symbol: '₫', decimalDigits: 0);
+
 /// "₫32.500.000" — no decimals, Vietnamese grouping.
-String vnd(num usd, double rate) {
-  final f = NumberFormat.currency(locale: 'vi', symbol: '₫', decimalDigits: 0);
-  return f.format(usd * rate);
-}
+String vnd(num usd, double rate) => _vndFormat.format(usd * rate);

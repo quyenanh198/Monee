@@ -8,6 +8,7 @@ import '../../core/theme.dart';
 import '../../data/repositories.dart';
 import '../../widgets/common.dart';
 import 'recurring_logic.dart';
+import 'recurring_providers.dart';
 
 String _cadenceLabel(Cadence c) => switch (c) {
       Cadence.weekly => 'hằng tuần',
@@ -21,11 +22,9 @@ class RecurringScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final txns = ref.watch(sixMonthTxnsProvider);
-    final categories = ref.watch(categoriesProvider);
-    final catNames = {
-      for (final c in categories.valueOrNull ?? []) c.id: c.name
-    };
+    final catNames = ref.watch(categoryNamesProvider);
     final totalBalance = (ref.watch(accountsProvider).valueOrNull ?? [])
+        .where((a) => a.currency == 'USD') // ledger currency
         .fold(0.0, (s, a) => s + a.currentBalance);
 
     return Scaffold(
@@ -33,7 +32,7 @@ class RecurringScreen extends ConsumerWidget {
       body: AsyncBody(
         value: txns,
         builder: (list) {
-          final items = detectRecurring(list);
+          final items = ref.watch(recurringItemsProvider);
           if (items.isEmpty) {
             return const EmptyState(
                 'Chưa nhận diện được khoản chi định kỳ nào.\n'
@@ -88,7 +87,7 @@ class RecurringScreen extends ConsumerWidget {
               const SizedBox(height: 12),
               _ForecastCard(
                 startBalance: totalBalance,
-                items: detectRecurring(list, includeIncome: true),
+                items: ref.watch(recurringAllProvider),
               ),
               const SizedBox(height: 12),
               Text(

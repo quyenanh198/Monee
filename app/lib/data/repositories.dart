@@ -9,10 +9,50 @@ final supabaseProvider =
 
 String _uid(SupabaseClient db) => db.auth.currentUser!.id;
 
+// ---------------------------------------------------------------------- auth
+
+final _authChangesProvider = StreamProvider<AuthState>(
+    (_) => Supabase.instance.client.auth.onAuthStateChange);
+
+/// The signed-in user id, kept live across sign-out/sign-in. Every data
+/// provider watches this so a user switch drops the previous user's cache
+/// instead of serving it to the next account.
+final currentUserIdProvider = Provider<String?>((ref) {
+  final state = ref.watch(_authChangesProvider).valueOrNull;
+  return state?.session?.user.id ??
+      Supabase.instance.client.auth.currentUser?.id;
+});
+
+// ------------------------------------------------------------------- helpers
+
+/// PostgREST silently caps unbounded selects at the project's max-rows
+/// (1000 by default): page explicitly so big months are never truncated.
+Future<List<Map<String, dynamic>>> _fetchAll(
+    Future<List<Map<String, dynamic>>> Function(int from, int to) page) async {
+  const size = 1000;
+  final out = <Map<String, dynamic>>[];
+  for (var start = 0;; start += size) {
+    final rows = await page(start, start + size - 1);
+    out.addAll(rows);
+    if (rows.length < size) return out;
+  }
+}
+
+/// Quotes a value for a PostgREST `.or()` filter — commas/parentheses in the
+/// input must not break the filter syntax.
+String _pgQuote(String v) =>
+    '"${v.replaceAll(r'\', r'\\').replaceAll('"', r'\"')}"';
+
+/// Escapes LIKE wildcards so a rule pattern matches literally, exactly like
+/// matchRule() does on the Edge Function side.
+String _escapeLike(String v) =>
+    v.replaceAll(r'\', r'\\').replaceAll('%', r'\%').replaceAll('_', r'\_');
+
 // ------------------------------------------------------------------ accounts
 
 final accountsProvider = FutureProvider<List<Account>>((ref) async {
   final db = ref.watch(supabaseProvider);
+  if (ref.watch(currentUserIdProvider) == null) return const [];
   final rows = await db.from('accounts').select().order('created_at');
   return rows.map(Account.fromJson).toList();
 });
@@ -28,7 +68,9 @@ Future<void> createManualAccount(
     'name': name,
     'type': type,
     'current_balance': balance,
-    'balance_updated_at': DateTime.now().toIso8601String(),
+    // toUtc: a local wall-clock ISO string has no offset and lands shifted
+    // by the device's timezone in a timestamptz column.
+    'balance_updated_at': DateTime.now().toUtc().toIso8601String(),
   });
 }
 
@@ -64,8 +106,15 @@ Future<void> deleteAccount(SupabaseClient db, String id) async {
 
 final categoriesProvider = FutureProvider<List<Category>>((ref) async {
   final db = ref.watch(supabaseProvider);
+  if (ref.watch(currentUserIdProvider) == null) return const [];
   final rows = await db.from('categories').select().order('name');
   return rows.map(Category.fromJson).toList();
+});
+
+/// {category id → name} — the lookup every screen needs; built once.
+final categoryNamesProvider = Provider<Map<String, String>>((ref) {
+  final cats = ref.watch(categoriesProvider).valueOrNull ?? const <Category>[];
+  return {for (final c in cats) c.id: c.name};
 });
 
 Future<void> createCategory(SupabaseClient db, String name) async {
@@ -98,45 +147,44 @@ class TxnFilter {
       );
 }
 
-/// Quotes a user-typed term for a PostgREST `.or()` filter. Without quoting,
-/// commas/parentheses in the input break the filter syntax.
-String _orQuote(String term) {
-  final escaped = term.replaceAll(r'\', r'\\').replaceAll('"', r'\"');
-  return '"%$escaped%"';
-}
-
 final txnFilterProvider = StateProvider<TxnFilter>((_) => const TxnFilter());
 final txnPageSizeProvider = StateProvider<int>((_) => 100);
 
 final transactionsProvider = FutureProvider<List<Txn>>((ref) async {
   final db = ref.watch(supabaseProvider);
+  if (ref.watch(currentUserIdProvider) == null) return const [];
   final f = ref.watch(txnFilterProvider);
   final limit = ref.watch(txnPageSizeProvider);
 
-  var q = db.from('transactions').select();
-  if (f.accountId != null) q = q.eq('account_id', f.accountId!);
-  if (f.categoryId != null) q = q.eq('category_id', f.categoryId!);
-  if (f.month != null) {
-    q = q
-        .gte('date', isoDate(monthStart(f.month!)))
-        .lt('date', isoDate(addMonths(f.month!, 1)));
-  }
-  if (f.search.isNotEmpty) {
-    final term = _orQuote(f.search);
-    q = q.or(
-        'merchant_name.ilike.$term,description.ilike.$term,note.ilike.$term');
-  }
-  final rows = await q.order('date', ascending: false).limit(limit);
-  return rows.map(Txn.fromJson).toList();
+  final rows = await _fetchAll((from, to) {
+    var q = db.from('transactions').select();
+    if (f.accountId != null) q = q.eq('account_id', f.accountId!);
+    if (f.categoryId != null) q = q.eq('category_id', f.categoryId!);
+    if (f.month != null) {
+      q = q
+          .gte('date', isoDate(monthStart(f.month!)))
+          .lt('date', isoDate(addMonths(f.month!, 1)));
+    }
+    if (f.search.isNotEmpty) {
+      final term = _pgQuote('%${f.search}%');
+      q = q.or(
+          'merchant_name.ilike.$term,description.ilike.$term,note.ilike.$term');
+    }
+    final upper = to < limit - 1 ? to : limit - 1;
+    return q.order('date', ascending: false).range(from, upper);
+  });
+  return rows.take(limit).map(Txn.fromJson).toList();
 });
 
 /// Realtime stream of the 10 most recent transactions (dashboard).
 final recentTxnsProvider = StreamProvider<List<Txn>>((ref) {
   final db = ref.watch(supabaseProvider);
+  final uid = ref.watch(currentUserIdProvider);
+  if (uid == null) return Stream.value(const <Txn>[]);
   return db
       .from('transactions')
       .stream(primaryKey: ['id'])
-      .eq('user_id', _uid(db))
+      .eq('user_id', uid)
       .order('date')
       .limit(10)
       .map((rows) => rows.map(Txn.fromJson).toList());
@@ -145,12 +193,14 @@ final recentTxnsProvider = StreamProvider<List<Txn>>((ref) {
 /// Transactions for the last 6 calendar months, inclusive of current (reports).
 final sixMonthTxnsProvider = FutureProvider<List<Txn>>((ref) async {
   final db = ref.watch(supabaseProvider);
+  if (ref.watch(currentUserIdProvider) == null) return const [];
   final from = addMonths(DateTime.now(), -5);
-  final rows = await db
+  final rows = await _fetchAll((start, end) => db
       .from('transactions')
       .select()
       .gte('date', isoDate(from))
-      .order('date');
+      .order('date', ascending: true)
+      .range(start, end));
   return rows.map(Txn.fromJson).toList();
 });
 
@@ -158,13 +208,26 @@ final sixMonthTxnsProvider = FutureProvider<List<Txn>>((ref) async {
 final monthTxnsProvider =
     FutureProvider.family<List<Txn>, DateTime>((ref, month) async {
   final db = ref.watch(supabaseProvider);
-  final rows = await db
+  if (ref.watch(currentUserIdProvider) == null) return const [];
+  final rows = await _fetchAll((start, end) => db
       .from('transactions')
       .select()
       .gte('date', isoDate(monthStart(month)))
-      .lt('date', isoDate(addMonths(month, 1)));
+      .lt('date', isoDate(addMonths(month, 1)))
+      .order('date', ascending: true)
+      .range(start, end));
   return rows.map(Txn.fromJson).toList();
 });
+
+/// Every transaction row, newest first (CSV export) — paginated.
+Future<List<Txn>> fetchAllTxns(SupabaseClient db) async {
+  final rows = await _fetchAll((start, end) => db
+      .from('transactions')
+      .select()
+      .order('date', ascending: false)
+      .range(start, end));
+  return rows.map(Txn.fromJson).toList();
+}
 
 Future<void> upsertManualTxn(
   SupabaseClient db, {
@@ -194,26 +257,20 @@ Future<void> upsertManualTxn(
   }
 }
 
-/// Splits [parent] into [parts] (each a signed amount + category). Children
-/// carry parent_txn_id; aggregations then count the children instead of the
-/// parent (see budget_logic.effectiveTxns).
+/// Splits [parent] into [parts] via the split_transaction RPC — atomic
+/// (replaces any previous children under a row lock, so concurrent splits
+/// can't double-count) and server-validated (parts must sum to the parent).
 Future<void> splitTxn(
   SupabaseClient db,
   Txn parent,
   List<({double amount, String? categoryId})> parts,
 ) async {
-  await db.from('transactions').insert([
-    for (final p in parts)
-      {
-        'user_id': _uid(db),
-        'account_id': parent.accountId,
-        'amount': p.amount,
-        'date': isoDate(parent.date),
-        'description': '${parent.title} (tách)',
-        'category_id': p.categoryId,
-        'parent_txn_id': parent.id,
-      },
-  ]);
+  await db.rpc('split_transaction', params: {
+    'p_parent': parent.id,
+    'p_parts': [
+      for (final p in parts) {'amount': p.amount, 'category_id': p.categoryId},
+    ],
+  });
 }
 
 /// Removes all split children of a parent transaction.
@@ -246,6 +303,7 @@ Future<void> deleteTxn(SupabaseClient db, String id) async {
 final budgetsProvider =
     FutureProvider.family<List<Budget>, DateTime>((ref, month) async {
   final db = ref.watch(supabaseProvider);
+  if (ref.watch(currentUserIdProvider) == null) return const [];
   final rows = await db
       .from('budgets')
       .select()
@@ -277,6 +335,7 @@ Future<void> deleteBudget(SupabaseClient db, String id) async {
 
 final rulesProvider = FutureProvider<List<Rule>>((ref) async {
   final db = ref.watch(supabaseProvider);
+  if (ref.watch(currentUserIdProvider) == null) return const [];
   final rows = await db.from('rules').select().order('created_at');
   return rows.map(Rule.fromJson).toList();
 });
@@ -300,15 +359,17 @@ Future<void> deleteRule(SupabaseClient db, String id) async {
 }
 
 /// Applies a rule to existing uncategorized transactions. Returns the number
-/// of transactions updated.
+/// of transactions updated. LIKE wildcards in the pattern are escaped so the
+/// match is a literal substring — identical to matchRule() during sync.
 Future<int> applyRuleToExisting(SupabaseClient db, Rule rule) async {
-  final term = _orQuote(rule.pattern);
+  final pattern = '%${_escapeLike(rule.pattern)}%';
+  final term = _pgQuote(pattern);
   var q = db
       .from('transactions')
       .update({'category_id': rule.categoryId}).isFilter('category_id', null);
   q = switch (rule.matchField) {
-    'merchant' => q.ilike('merchant_name', '%${rule.pattern}%'),
-    'description' => q.ilike('description', '%${rule.pattern}%'),
+    'merchant' => q.ilike('merchant_name', pattern),
+    'description' => q.ilike('description', pattern),
     _ => q.or('merchant_name.ilike.$term,description.ilike.$term'),
   };
   final rows = await q.select('id');
@@ -319,6 +380,7 @@ Future<int> applyRuleToExisting(SupabaseClient db, Rule rule) async {
 
 final goalsProvider = FutureProvider<List<Goal>>((ref) async {
   final db = ref.watch(supabaseProvider);
+  if (ref.watch(currentUserIdProvider) == null) return const [];
   final rows = await db.from('goals').select().order('created_at');
   return rows.map(Goal.fromJson).toList();
 });
@@ -356,6 +418,7 @@ Future<void> deleteGoal(SupabaseClient db, String id) async {
 /// Net-worth history, oldest first (last ~180 days).
 final snapshotsProvider = FutureProvider<List<BalanceSnapshot>>((ref) async {
   final db = ref.watch(supabaseProvider);
+  if (ref.watch(currentUserIdProvider) == null) return const [];
   final from = DateTime.now().subtract(const Duration(days: 180));
   final rows = await db
       .from('balance_snapshots')
@@ -367,13 +430,27 @@ final snapshotsProvider = FutureProvider<List<BalanceSnapshot>>((ref) async {
 
 // --------------------------------------------------------------- plaid calls
 
+/// Bank connections with their health (client may read these columns only).
+final plaidItemsProvider = FutureProvider<List<PlaidItem>>((ref) async {
+  final db = ref.watch(supabaseProvider);
+  if (ref.watch(currentUserIdProvider) == null) return const [];
+  final rows =
+      await db.from('plaid_items').select('id, institution_name, status');
+  return rows.map(PlaidItem.fromJson).toList();
+});
+
 class PlaidService {
   final SupabaseClient db;
   PlaidService(this.db);
 
-  Future<({String linkToken, String url})> createHostedLink() async {
-    final res = await db.functions
-        .invoke('plaid-link', body: {'action': 'create_hosted_link'});
+  /// New link, or Link *update mode* to re-authenticate [itemId] after
+  /// ITEM_LOGIN_REQUIRED (keeps the item's accounts and history).
+  Future<({String linkToken, String url})> createHostedLink(
+      {String? itemId}) async {
+    final res = await db.functions.invoke('plaid-link', body: {
+      'action': 'create_hosted_link',
+      if (itemId != null) 'item_id': itemId,
+    });
     final data = res.data as Map<String, dynamic>;
     if (data['error'] != null) throw Exception(data['error']);
     return (
@@ -391,10 +468,21 @@ class PlaidService {
     return data['linked'] == true;
   }
 
+  /// Throws when the sync response carries per-item failures — a 200 with
+  /// results[i].error is still a failed sync for that bank.
   Future<void> syncNow() async {
     final res = await db.functions.invoke('plaid-sync');
     final data = res.data as Map<String, dynamic>;
     if (data['error'] != null) throw Exception(data['error']);
+    final results = (data['results'] as List?) ?? const [];
+    final errors = [
+      for (final r in results)
+        if (r is Map && r['error'] != null) r['error'].toString(),
+    ];
+    if (errors.isNotEmpty) {
+      throw Exception(
+          'Lỗi ${errors.length}/${results.length} kết nối: ${errors.first}');
+    }
   }
 }
 
@@ -410,4 +498,5 @@ void refreshData(WidgetRef ref) {
   ref.invalidate(budgetsProvider);
   ref.invalidate(goalsProvider);
   ref.invalidate(snapshotsProvider);
+  ref.invalidate(plaidItemsProvider);
 }

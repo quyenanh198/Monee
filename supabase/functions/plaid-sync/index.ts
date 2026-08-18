@@ -17,9 +17,11 @@ Deno.serve(async (req) => {
   const userId = isCron ? null : await callerUserId(req);
   if (!isCron && !userId) return json({ error: "unauthorized" }, 401);
 
+  // 'error' items are retried too — a transient failure must never disable an
+  // item forever. 'login_required' needs the re-auth flow, not a retry.
   let q = db.from("plaid_items")
     .select("id, user_id, access_token, sync_cursor")
-    .eq("status", "active");
+    .in("status", ["active", "error"]);
   if (userId) q = q.eq("user_id", userId);
   const { data: items, error } = await q;
   if (error) return json({ error: error.message }, 500);

@@ -1,8 +1,13 @@
 import 'package:intl/intl.dart';
 
+// NumberFormat construction is expensive and money() runs once per tile per
+// rebuild — cache one formatter per currency code.
+final Map<String, NumberFormat> _moneyFormats = {};
+
 /// Sign convention (Plaid): amount > 0 = money out, amount < 0 = money in.
 String money(num amount, {String currency = 'USD', bool signed = false}) {
-  final f = NumberFormat.simpleCurrency(name: currency);
+  final f = _moneyFormats.putIfAbsent(
+      currency, () => NumberFormat.simpleCurrency(name: currency));
   if (!signed) return f.format(amount.abs());
   final sign = amount > 0 ? '-' : (amount < 0 ? '+' : '');
   return '$sign${f.format(amount.abs())}';

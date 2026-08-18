@@ -108,15 +108,18 @@ class SettingsScreen extends ConsumerWidget {
   Future<void> _exportCsv(BuildContext context, WidgetRef ref) async {
     final messenger = ScaffoldMessenger.of(context);
     final db = ref.read(supabaseProvider);
-    final txRows = await db
-        .from('transactions')
-        .select()
-        .order('date', ascending: false);
-    final accRows = await db.from('accounts').select('id, name');
-    final catRows = await db.from('categories').select('id, name');
+    // Concurrent, and paginated past PostgREST's 1000-row cap.
+    final results = await Future.wait<dynamic>([
+      fetchAllTxns(db),
+      db.from('accounts').select('id, name'),
+      db.from('categories').select('id, name'),
+    ]);
+    final txns = results[0] as List<Txn>;
+    final accRows = results[1] as List<Map<String, dynamic>>;
+    final catRows = results[2] as List<Map<String, dynamic>>;
 
     final csv = transactionsToCsv(
-      txRows.map(Txn.fromJson).toList(),
+      txns,
       accountNames: {
         for (final r in accRows) r['id'] as String: r['name'] as String
       },
@@ -126,7 +129,7 @@ class SettingsScreen extends ConsumerWidget {
     );
     await Clipboard.setData(ClipboardData(text: csv));
     messenger.showSnackBar(SnackBar(
-        content: Text('Đã sao chép ${txRows.length} giao dịch (CSV)')));
+        content: Text('Đã sao chép ${txns.length} giao dịch (CSV)')));
   }
 }
 

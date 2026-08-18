@@ -12,6 +12,7 @@ import '../../models/models.dart';
 import '../../widgets/common.dart';
 import '../budgets/budget_logic.dart';
 import '../recurring/recurring_logic.dart';
+import '../recurring/recurring_providers.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -22,7 +23,7 @@ class DashboardScreen extends ConsumerWidget {
     final month = monthStart(DateTime.now());
     final monthTxns = ref.watch(monthTxnsProvider(month));
     final recent = ref.watch(recentTxnsProvider);
-    final categories = ref.watch(categoriesProvider);
+    final catNames = ref.watch(categoryNamesProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -58,17 +59,26 @@ class DashboardScreen extends ConsumerWidget {
             AsyncBody(
               value: accounts,
               builder: (list) {
-                final total =
-                    list.fold(0.0, (s, a) => s + a.currentBalance);
+                // USD only — adding mixed currencies gives a meaningless sum.
+                final total = list
+                    .where((a) => a.currency == 'USD')
+                    .fold(0.0, (s, a) => s + a.currentBalance);
+                final hasForeign = list.any((a) => a.currency != 'USD');
                 final showVnd = ref.watch(showVndProvider);
                 final rate =
                     showVnd ? ref.watch(vndRateProvider).valueOrNull : null;
+                final subParts = [
+                  if (rate != null) '≈ ${vnd(total, rate)}',
+                  if (hasForeign) 'chưa gồm tài khoản ngoại tệ',
+                ];
                 return Row(children: [
                   Expanded(
                       child: KpiCard(
                           label: 'Tổng số dư',
                           value: money(total),
-                          sub: rate == null ? null : '≈ ${vnd(total, rate)}')),
+                          sub: subParts.isEmpty
+                              ? null
+                              : subParts.join(' · '))),
                   const SizedBox(width: 12),
                   Expanded(
                     child: AsyncBody(
@@ -87,8 +97,8 @@ class DashboardScreen extends ConsumerWidget {
               },
             ),
             const SizedBox(height: 16),
-            _SpendDonut(monthTxns: monthTxns, categories: categories),
-            _UpcomingBills(sixMonth: ref.watch(sixMonthTxnsProvider)),
+            _SpendDonut(monthTxns: monthTxns, catNames: catNames),
+            _UpcomingBills(items: ref.watch(recurringItemsProvider)),
             const SizedBox(height: 16),
             Text('Giao dịch gần đây',
                 style: Theme.of(context).textTheme.titleMedium),
@@ -101,13 +111,7 @@ class DashboardScreen extends ConsumerWidget {
                   : Card(
                       child: Column(children: [
                         for (final t in txns)
-                          TxnTile(
-                            txn: t,
-                            categoryName: categories.valueOrNull
-                                ?.where((c) => c.id == t.categoryId)
-                                .firstOrNull
-                                ?.name,
-                          ),
+                          TxnTile(txn: t, categoryName: catNames[t.categoryId]),
                       ]),
                     ),
             ),
@@ -118,21 +122,18 @@ class DashboardScreen extends ConsumerWidget {
   }
 }
 
-/// Recurring charges due in the next 14 days, detected from recent history.
+/// Recurring charges due in the next 14 days (from recurringItemsProvider,
+/// computed once per data change — not per rebuild).
 class _UpcomingBills extends StatelessWidget {
-  final AsyncValue<List<Txn>> sixMonth;
-  const _UpcomingBills({required this.sixMonth});
+  final List<RecurringItem> items;
+  const _UpcomingBills({required this.items});
 
   @override
   Widget build(BuildContext context) {
-    final txns = sixMonth.valueOrNull;
-    if (txns == null) return const SizedBox.shrink();
     final today = DateTime.now();
     final horizon = today.add(const Duration(days: 14));
-    final due = detectRecurring(txns)
-        .where((i) => i.nextDue.isBefore(horizon))
-        .take(4)
-        .toList();
+    final due =
+        items.where((i) => i.nextDue.isBefore(horizon)).take(4).toList();
     if (due.isEmpty) return const SizedBox.shrink();
 
     return Padding(
@@ -180,8 +181,8 @@ class _UpcomingBills extends StatelessWidget {
 
 class _SpendDonut extends StatelessWidget {
   final AsyncValue<List<Txn>> monthTxns;
-  final AsyncValue<List<Category>> categories;
-  const _SpendDonut({required this.monthTxns, required this.categories});
+  final Map<String, String> catNames;
+  const _SpendDonut({required this.monthTxns, required this.catNames});
 
   @override
   Widget build(BuildContext context) {
@@ -192,9 +193,6 @@ class _SpendDonut extends StatelessWidget {
         if (spent.isEmpty) {
           return const SizedBox.shrink();
         }
-        final catNames = {
-          for (final c in categories.valueOrNull ?? <Category>[]) c.id: c.name
-        };
         final entries = spent.entries.toList()
           ..sort((a, b) => b.value.compareTo(a.value));
 
