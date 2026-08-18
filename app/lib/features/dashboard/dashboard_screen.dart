@@ -10,6 +10,7 @@ import '../../data/repositories.dart';
 import '../../models/models.dart';
 import '../../widgets/common.dart';
 import '../budgets/budget_logic.dart';
+import '../recurring/recurring_logic.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -81,6 +82,7 @@ class DashboardScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 16),
             _SpendDonut(monthTxns: monthTxns, categories: categories),
+            _UpcomingBills(sixMonth: ref.watch(sixMonthTxnsProvider)),
             const SizedBox(height: 16),
             Text('Giao dịch gần đây',
                 style: Theme.of(context).textTheme.titleMedium),
@@ -104,6 +106,66 @@ class DashboardScreen extends ConsumerWidget {
                     ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Recurring charges due in the next 14 days, detected from recent history.
+class _UpcomingBills extends StatelessWidget {
+  final AsyncValue<List<Txn>> sixMonth;
+  const _UpcomingBills({required this.sixMonth});
+
+  @override
+  Widget build(BuildContext context) {
+    final txns = sixMonth.valueOrNull;
+    if (txns == null) return const SizedBox.shrink();
+    final today = DateTime.now();
+    final horizon = today.add(const Duration(days: 14));
+    final due = detectRecurring(txns)
+        .where((i) => i.nextDue.isBefore(horizon))
+        .take(4)
+        .toList();
+    if (due.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Expanded(
+                  child: Text('Hóa đơn sắp tới',
+                      style: Theme.of(context).textTheme.titleMedium),
+                ),
+                TextButton(
+                  onPressed: () => context.go('/transactions/recurring'),
+                  child: const Text('Tất cả'),
+                ),
+              ]),
+              for (final i in due)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8, right: 8),
+                  child: Row(children: [
+                    const Icon(LucideIcons.repeat, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(i.name,
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ),
+                    Text(shortDate(i.nextDue),
+                        style: Theme.of(context).textTheme.bodySmall),
+                    const SizedBox(width: 12),
+                    Text(money(i.amount),
+                        style: moneyStyle(context, size: 13.5)),
+                  ]),
+                ),
+            ],
+          ),
         ),
       ),
     );

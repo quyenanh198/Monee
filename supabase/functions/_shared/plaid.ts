@@ -89,9 +89,58 @@ export interface PlaidTxn {
   pending: boolean;
 }
 
+interface Rule {
+  pattern: string;
+  match_field: "merchant" | "description" | "any";
+  category_id: string;
+}
+
+/** First rule whose pattern is contained (case-insensitive) in the txn's text. */
+export function matchRule(
+  rules: Rule[],
+  merchant: string | null,
+  description: string | null,
+): string | null {
+  const m = (merchant ?? "").toLowerCase();
+  const d = (description ?? "").toLowerCase();
+  for (const r of rules) {
+    const p = r.pattern.toLowerCase();
+    const hit = r.match_field === "merchant"
+      ? m.includes(p)
+      : r.match_field === "description"
+      ? d.includes(p)
+      : m.includes(p) || d.includes(p);
+    if (hit) return r.category_id;
+  }
+  return null;
+}
+
+/**
+ * Daily net-worth snapshot: one row per user per day, total across all
+ * accounts. Pass userId to snapshot one user, omit for everyone (cron).
+ */
+export async function snapshotBalances(db: SupabaseClient, userId?: string): Promise<void> {
+  let q = db.from("accounts").select("user_id, current_balance");
+  if (userId) q = q.eq("user_id", userId);
+  const { data } = await q;
+  if (!data?.length) return;
+  const totals = new Map<string, number>();
+  for (const a of data) {
+    totals.set(a.user_id, (totals.get(a.user_id) ?? 0) + Number(a.current_balance));
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = [...totals].map(([uid, total]) => ({
+    user_id: uid,
+    date: today,
+    total: Math.round(total * 100) / 100,
+  }));
+  await db.from("balance_snapshots").upsert(rows, { onConflict: "user_id,date" });
+}
+
 /**
  * Run /transactions/sync for one plaid_items row until has_more is false.
- * Upserts transactions, applies removals, updates balances + cursor, writes a sync_log.
+ * Upserts transactions (applying the user's categorization rules to new
+ * ones), applies removals, updates balances + cursor, writes a sync_log.
  */
 export async function syncItem(
   db: SupabaseClient,
@@ -105,6 +154,13 @@ export async function syncItem(
     .from("accounts").select("id, plaid_account_id").eq("plaid_item_id", item.id);
   const accMap = new Map((accounts ?? []).map((a) => [a.plaid_account_id as string, a.id as string]));
 
+  // Categorization rules — applied to newly added transactions only, so a
+  // user's manual category on an existing row is never overwritten.
+  const { data: ruleRows } = await db
+    .from("rules").select("pattern, match_field, category_id")
+    .eq("user_id", item.user_id).order("created_at");
+  const rules = (ruleRows ?? []) as { pattern: string; match_field: "merchant" | "description" | "any"; category_id: string }[];
+
   try {
     for (let hasMore = true; hasMore;) {
       const page = await plaid<{
@@ -113,22 +169,35 @@ export async function syncItem(
         next_cursor: string; has_more: boolean;
       }>("/transactions/sync", { access_token: item.access_token, cursor, count: 500 });
 
-      const upserts = [...page.added, ...page.modified]
-        .filter((t) => accMap.has(t.account_id))
-        .map((t) => ({
-          user_id: item.user_id,
-          account_id: accMap.get(t.account_id),
-          plaid_transaction_id: t.transaction_id,
-          amount: t.amount,
-          currency: t.iso_currency_code ?? "USD",
-          date: t.date,
-          merchant_name: t.merchant_name,
-          description: t.name,
-          is_pending: t.pending,
-        }));
-      if (upserts.length) {
+      const toRow = (t: PlaidTxn) => ({
+        user_id: item.user_id,
+        account_id: accMap.get(t.account_id),
+        plaid_transaction_id: t.transaction_id,
+        amount: t.amount,
+        currency: t.iso_currency_code ?? "USD",
+        date: t.date,
+        merchant_name: t.merchant_name,
+        description: t.name,
+        is_pending: t.pending,
+      });
+
+      // Batches must have uniform columns: added rows with a rule match carry
+      // category_id; everything else omits it so existing categories survive.
+      const withCategory: Record<string, unknown>[] = [];
+      const withoutCategory: Record<string, unknown>[] = [];
+      for (const t of page.added) {
+        if (!accMap.has(t.account_id)) continue;
+        const cat = matchRule(rules, t.merchant_name, t.name);
+        if (cat) withCategory.push({ ...toRow(t), category_id: cat });
+        else withoutCategory.push(toRow(t));
+      }
+      for (const t of page.modified) {
+        if (accMap.has(t.account_id)) withoutCategory.push(toRow(t));
+      }
+      for (const batch of [withCategory, withoutCategory]) {
+        if (!batch.length) continue;
         const { error } = await db.from("transactions")
-          .upsert(upserts, { onConflict: "plaid_transaction_id" });
+          .upsert(batch, { onConflict: "plaid_transaction_id" });
         if (error) throw new Error(error.message);
       }
       if (page.removed.length) {

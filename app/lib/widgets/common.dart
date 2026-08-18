@@ -91,6 +91,7 @@ class TxnTile extends StatelessWidget {
         shortDate(txn.date),
         if (categoryName != null) categoryName!,
         if (txn.isPending) 'đang chờ',
+        if (txn.tags.isNotEmpty) txn.tags.map((t) => '#$t').join(' '),
       ].join(' · ')),
       trailing: Text(
         money(txn.amount, currency: txn.currency, signed: true),

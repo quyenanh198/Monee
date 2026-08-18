@@ -9,7 +9,10 @@ import '../features/accounts/accounts_screen.dart';
 import '../features/auth/login_screen.dart';
 import '../features/budgets/budgets_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
+import '../features/goals/goals_screen.dart';
+import '../features/recurring/recurring_screen.dart';
 import '../features/reports/reports_screen.dart';
+import '../features/rules/rules_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/shell/app_shell.dart';
 import '../features/transactions/transactions_screen.dart';
@@ -59,14 +62,30 @@ GoRouter buildRouter() {
             ],
           ),
           GoRoute(
-              path: '/transactions',
-              builder: (_, __) => const TransactionsScreen()),
+            path: '/transactions',
+            builder: (_, __) => const TransactionsScreen(),
+            routes: [
+              GoRoute(
+                  path: 'recurring',
+                  builder: (_, __) => const RecurringScreen()),
+            ],
+          ),
           GoRoute(
-              path: '/budgets', builder: (_, __) => const BudgetsScreen()),
+            path: '/budgets',
+            builder: (_, __) => const BudgetsScreen(),
+            routes: [
+              GoRoute(path: 'goals', builder: (_, __) => const GoalsScreen()),
+            ],
+          ),
           GoRoute(
               path: '/reports', builder: (_, __) => const ReportsScreen()),
           GoRoute(
-              path: '/settings', builder: (_, __) => const SettingsScreen()),
+            path: '/settings',
+            builder: (_, __) => const SettingsScreen(),
+            routes: [
+              GoRoute(path: 'rules', builder: (_, __) => const RulesScreen()),
+            ],
+          ),
         ],
       ),
     ],

@@ -10,7 +10,13 @@ Flutter (Riverpod · go_router · fl_chart · supabase_flutter)
           └── Plaid: Hosted Link · /transactions/sync · webhook
 ```
 
-Design spec: `docs/superpowers/specs/2026-08-17-monee-mvp-design.md`
+Features: Plaid sync + manual accounts · budgets with rollover ·
+auto-categorization rules · recurring-charge detection & upcoming bills ·
+net-worth history · savings goals · split transactions, notes & tags ·
+reports · CSV export · dark/light theme.
+
+Design spec: `docs/superpowers/specs/2026-08-17-monee-mvp-design.md` ·
+Flow diagrams: `docs/flow.html`
 
 ## 1. Supabase setup
 
@@ -19,6 +25,7 @@ Design spec: `docs/superpowers/specs/2026-08-17-monee-mvp-design.md`
    - `supabase/migrations/20260817000000_init.sql`
    - `supabase/migrations/20260817000001_seed_categories.sql`
    - `supabase/migrations/20260817000002_security_hardening.sql`
+   - `supabase/migrations/20260818000000_features.sql`
 3. Deploy Edge Functions:
    ```bash
    supabase functions deploy plaid-link
@@ -125,4 +132,4 @@ no native SDK). Finish the flow there, come back, press **Đã xong**.
 - Verify Plaid webhook JWS signatures in `plaid-webhook` (currently the payload is
   untrusted-by-design: only `item_id` is used, to re-sync an item we already own).
 - Periodic DB export (free tier has no automatic backups).
-- Multi-currency conversion, recurring detection, shared accounts.
+- Multi-currency conversion, shared accounts, push notifications.

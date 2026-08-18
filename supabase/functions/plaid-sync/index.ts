@@ -5,7 +5,7 @@
 //   2. Cron (header x-cron-secret == CRON_SECRET) — syncs every active item daily.
 //      Schedule with pg_cron + pg_net or an external scheduler (see README).
 
-import { adminClient, callerUserId, corsHeaders, json, safeEqual, syncItem } from "../_shared/plaid.ts";
+import { adminClient, callerUserId, corsHeaders, json, safeEqual, snapshotBalances, syncItem } from "../_shared/plaid.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders() });
@@ -32,5 +32,13 @@ Deno.serve(async (req) => {
       results.push({ item: item.id, error: String(e) });
     }
   }
+
+  // Daily net-worth snapshot (also covers manual-only accounts on cron runs).
+  try {
+    await snapshotBalances(db, userId ?? undefined);
+  } catch (_e) {
+    // snapshot failure must not fail the sync response
+  }
+
   return json({ synced: results.length, results });
 });

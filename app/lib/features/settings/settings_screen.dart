@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -66,6 +67,13 @@ class SettingsScreen extends ConsumerWidget {
                   onSelectionChanged: (s) =>
                       ref.read(themeModeProvider.notifier).set(s.first),
                 ),
+              ),
+              ListTile(
+                leading: const Icon(LucideIcons.wand2),
+                title: const Text('Rules phân loại tự động'),
+                subtitle: const Text(
+                    'Tự gán danh mục cho giao dịch mới theo merchant/mô tả'),
+                onTap: () => context.go('/settings/rules'),
               ),
               ListTile(
                 leading: const Icon(LucideIcons.fileDown),

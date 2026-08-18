@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/formatters.dart';
@@ -23,7 +24,16 @@ class TransactionsScreen extends ConsumerWidget {
     final catNames = {for (final c in catList) c.id: c.name};
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Giao dịch')),
+      appBar: AppBar(
+        title: const Text('Giao dịch'),
+        actions: [
+          IconButton(
+            tooltip: 'Chi định kỳ',
+            icon: const Icon(LucideIcons.repeat),
+            onPressed: () => context.go('/transactions/recurring'),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton(
         tooltip: 'Thêm giao dịch',
         onPressed: accList.isEmpty
@@ -155,10 +165,18 @@ Future<void> showTxnForm(
   final amount = TextEditingController(
       text: existing?.amount.abs().toStringAsFixed(2) ?? '');
   final description = TextEditingController(text: existing?.description ?? '');
+  final note = TextEditingController(text: existing?.note ?? '');
+  final tags = TextEditingController(text: existing?.tags.join(', ') ?? '');
   var isExpense = existing?.isExpense ?? true;
   var date = existing?.date ?? DateTime.now();
   var accountId = existing?.accountId ?? accounts.first.id;
   String? categoryId = existing?.categoryId;
+
+  List<String> parseTags() => tags.text
+      .split(',')
+      .map((t) => t.trim())
+      .where((t) => t.isNotEmpty)
+      .toList();
 
   await showDialog<void>(
     context: context,
@@ -233,6 +251,33 @@ Future<void> showTxnForm(
               ],
               onChanged: (v) => categoryId = v,
             ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: note,
+              decoration: const InputDecoration(labelText: 'Ghi chú'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: tags,
+              decoration: const InputDecoration(
+                  labelText: 'Tags', helperText: 'Cách nhau bằng dấu phẩy'),
+            ),
+            if (existing != null && !existing.isSplitChild) ...[
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  icon: const Icon(LucideIcons.scissors, size: 18),
+                  label: const Text('Tách giao dịch'),
+                  onPressed: () async {
+                    final nav = Navigator.of(ctx);
+                    final done =
+                        await showSplitDialog(ctx, ref, existing, cats);
+                    if (done) nav.pop();
+                  },
+                ),
+              ),
+            ],
           ]),
         ),
         actions: [
@@ -252,8 +297,10 @@ Future<void> showTxnForm(
             onPressed: () async {
               final nav = Navigator.of(ctx);
               final db = ref.read(supabaseProvider);
+              final noteVal = note.text.trim().isEmpty ? null : note.text.trim();
               if (plaidRow) {
-                await setTxnCategory(db, existing.id, categoryId);
+                await updateTxnMeta(db, existing.id,
+                    categoryId: categoryId, note: noteVal, tags: parseTags());
               } else {
                 final raw = double.tryParse(amount.text) ?? 0;
                 await upsertManualTxn(
@@ -266,6 +313,8 @@ Future<void> showTxnForm(
                       ? null
                       : description.text.trim(),
                   categoryId: categoryId,
+                  note: noteVal,
+                  tags: parseTags(),
                 );
               }
               refreshData(ref);
@@ -277,4 +326,122 @@ Future<void> showTxnForm(
       ),
     ),
   );
+}
+
+/// Split [parent] into 2+ parts whose amounts must sum to the original.
+/// Re-splitting replaces the previous parts. Returns true when saved.
+Future<bool> showSplitDialog(
+  BuildContext context,
+  WidgetRef ref,
+  Txn parent,
+  List<Category> cats,
+) async {
+  final total = parent.amount.abs();
+  final sign = parent.amount >= 0 ? 1 : -1;
+  final amounts = [TextEditingController(), TextEditingController()];
+  final catIds = <String?>[parent.categoryId, null];
+  var saved = false;
+
+  await showDialog<void>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setState) {
+        final entered = amounts
+            .map((c) => double.tryParse(c.text) ?? 0)
+            .fold(0.0, (s, v) => s + v);
+        final remaining = total - entered;
+
+        return AlertDialog(
+          title: const Text('Tách giao dịch'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text('${parent.title} · ${money(total)}',
+                  style: Theme.of(ctx).textTheme.bodyMedium),
+              const SizedBox(height: 12),
+              for (var i = 0; i < amounts.length; i++)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(children: [
+                    SizedBox(
+                      width: 110,
+                      child: TextField(
+                        controller: amounts[i],
+                        decoration: InputDecoration(labelText: 'Phần ${i + 1}'),
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        onChanged: (_) => setState(() {}),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: DropdownButtonFormField<String?>(
+                        initialValue: catIds[i],
+                        decoration:
+                            const InputDecoration(labelText: 'Danh mục'),
+                        items: [
+                          const DropdownMenuItem(
+                              value: null, child: Text('Chưa phân loại')),
+                          for (final c in cats)
+                            DropdownMenuItem(value: c.id, child: Text(c.name)),
+                        ],
+                        onChanged: (v) => catIds[i] = v,
+                      ),
+                    ),
+                  ]),
+                ),
+              TextButton.icon(
+                icon: const Icon(LucideIcons.plus, size: 16),
+                label: const Text('Thêm phần'),
+                onPressed: () => setState(() {
+                  amounts.add(TextEditingController());
+                  catIds.add(null);
+                }),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                remaining.abs() < 0.005
+                    ? 'Đủ ${money(total)}'
+                    : 'Còn thiếu ${money(remaining)}',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: remaining.abs() < 0.005
+                      ? null
+                      : Theme.of(ctx).colorScheme.error,
+                ),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
+            FilledButton(
+              onPressed: remaining.abs() >= 0.005
+                  ? null
+                  : () async {
+                      final nav = Navigator.of(ctx);
+                      final db = ref.read(supabaseProvider);
+                      final parts = <({double amount, String? categoryId})>[
+                        for (var i = 0; i < amounts.length; i++)
+                          if ((double.tryParse(amounts[i].text) ?? 0) > 0)
+                            (
+                              amount: sign *
+                                  (double.tryParse(amounts[i].text) ?? 0),
+                              categoryId: catIds[i],
+                            ),
+                      ];
+                      if (parts.length < 2) return;
+                      await unsplitTxn(db, parent.id);
+                      await splitTxn(db, parent, parts);
+                      refreshData(ref);
+                      saved = true;
+                      nav.pop();
+                    },
+              child: const Text('Tách'),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+  return saved;
 }

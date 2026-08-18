@@ -17,6 +17,8 @@ class ReportsScreen extends ConsumerWidget {
     final txns = ref.watch(sixMonthTxnsProvider);
     final categories = ref.watch(categoriesProvider);
 
+    final snapshots = ref.watch(snapshotsProvider);
+
     return Scaffold(
       appBar: AppBar(title: const Text('Báo cáo')),
       body: AsyncBody(
@@ -40,6 +42,7 @@ class ReportsScreen extends ConsumerWidget {
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              _NetWorthCard(snapshots: snapshots.valueOrNull ?? []),
               Row(children: [
                 Expanded(
                   child: KpiCard(
@@ -130,6 +133,97 @@ class ReportsScreen extends ConsumerWidget {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+/// Net-worth history line — one point per daily balance snapshot.
+class _NetWorthCard extends StatelessWidget {
+  final List<BalanceSnapshot> snapshots;
+  const _NetWorthCard({required this.snapshots});
+
+  @override
+  Widget build(BuildContext context) {
+    if (snapshots.length < 2) return const SizedBox.shrink();
+    final color = Theme.of(context).colorScheme.primary;
+    final first = snapshots.first;
+    final last = snapshots.last;
+    final delta = last.total - first.total;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Tài sản ròng',
+                  style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 4),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(money(last.total), style: moneyStyle(context, size: 22)),
+                  const SizedBox(width: 10),
+                  Text(
+                    '${delta >= 0 ? '+' : '-'}${money(delta.abs())} '
+                    'từ ${shortDate(first.date)}',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: delta >= 0
+                          ? MoneeColors.accent
+                          : MoneeColors.destructive,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                height: 140,
+                child: LineChart(
+                  LineChartData(
+                    gridData: const FlGridData(show: false),
+                    titlesData: const FlTitlesData(
+                      leftTitles: AxisTitles(),
+                      topTitles: AxisTitles(),
+                      rightTitles: AxisTitles(),
+                      bottomTitles: AxisTitles(),
+                    ),
+                    borderData: FlBorderData(show: false),
+                    lineBarsData: [
+                      LineChartBarData(
+                        spots: [
+                          for (var i = 0; i < snapshots.length; i++)
+                            FlSpot(i.toDouble(), snapshots[i].total),
+                        ],
+                        color: color,
+                        barWidth: 2,
+                        isCurved: false,
+                        dotData: const FlDotData(show: false),
+                        belowBarData: BarAreaData(
+                          show: true,
+                          color: color.withValues(alpha: 0.10),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(shortDate(first.date),
+                      style: Theme.of(context).textTheme.bodySmall),
+                  Text(shortDate(last.date),
+                      style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -123,7 +123,8 @@ final transactionsProvider = FutureProvider<List<Txn>>((ref) async {
   }
   if (f.search.isNotEmpty) {
     final term = _orQuote(f.search);
-    q = q.or('merchant_name.ilike.$term,description.ilike.$term');
+    q = q.or(
+        'merchant_name.ilike.$term,description.ilike.$term,note.ilike.$term');
   }
   final rows = await q.order('date', ascending: false).limit(limit);
   return rows.map(Txn.fromJson).toList();
@@ -173,6 +174,8 @@ Future<void> upsertManualTxn(
   required DateTime date,
   String? description,
   String? categoryId,
+  String? note,
+  List<String> tags = const [],
 }) async {
   final row = {
     'user_id': _uid(db),
@@ -181,6 +184,8 @@ Future<void> upsertManualTxn(
     'date': isoDate(date),
     'description': description,
     'category_id': categoryId,
+    'note': note,
+    'tags': tags,
   };
   if (id == null) {
     await db.from('transactions').insert(row);
@@ -189,11 +194,47 @@ Future<void> upsertManualTxn(
   }
 }
 
-Future<void> setTxnCategory(
-    SupabaseClient db, String txnId, String? categoryId) async {
-  await db
-      .from('transactions')
-      .update({'category_id': categoryId}).eq('id', txnId);
+/// Splits [parent] into [parts] (each a signed amount + category). Children
+/// carry parent_txn_id; aggregations then count the children instead of the
+/// parent (see budget_logic.effectiveTxns).
+Future<void> splitTxn(
+  SupabaseClient db,
+  Txn parent,
+  List<({double amount, String? categoryId})> parts,
+) async {
+  await db.from('transactions').insert([
+    for (final p in parts)
+      {
+        'user_id': _uid(db),
+        'account_id': parent.accountId,
+        'amount': p.amount,
+        'date': isoDate(parent.date),
+        'description': '${parent.title} (tách)',
+        'category_id': p.categoryId,
+        'parent_txn_id': parent.id,
+      },
+  ]);
+}
+
+/// Removes all split children of a parent transaction.
+Future<void> unsplitTxn(SupabaseClient db, String parentId) async {
+  await db.from('transactions').delete().eq('parent_txn_id', parentId);
+}
+
+/// Updates the user-editable metadata of any transaction (Plaid rows keep
+/// their amount/date/merchant from sync; only these fields are ours).
+Future<void> updateTxnMeta(
+  SupabaseClient db,
+  String txnId, {
+  String? categoryId,
+  String? note,
+  List<String> tags = const [],
+}) async {
+  await db.from('transactions').update({
+    'category_id': categoryId,
+    'note': note,
+    'tags': tags,
+  }).eq('id', txnId);
 }
 
 Future<void> deleteTxn(SupabaseClient db, String id) async {
@@ -217,18 +258,112 @@ Future<void> upsertBudget(
   required String categoryId,
   required DateTime month,
   required double amount,
+  bool rollover = false,
 }) async {
   await db.from('budgets').upsert({
     'user_id': _uid(db),
     'category_id': categoryId,
     'month': isoDate(monthStart(month)),
     'amount': amount,
+    'rollover': rollover,
   }, onConflict: 'user_id,category_id,month');
 }
 
 Future<void> deleteBudget(SupabaseClient db, String id) async {
   await db.from('budgets').delete().eq('id', id);
 }
+
+// --------------------------------------------------------------------- rules
+
+final rulesProvider = FutureProvider<List<Rule>>((ref) async {
+  final db = ref.watch(supabaseProvider);
+  final rows = await db.from('rules').select().order('created_at');
+  return rows.map(Rule.fromJson).toList();
+});
+
+Future<void> createRule(
+  SupabaseClient db, {
+  required String pattern,
+  required String matchField,
+  required String categoryId,
+}) async {
+  await db.from('rules').insert({
+    'user_id': _uid(db),
+    'pattern': pattern,
+    'match_field': matchField,
+    'category_id': categoryId,
+  });
+}
+
+Future<void> deleteRule(SupabaseClient db, String id) async {
+  await db.from('rules').delete().eq('id', id);
+}
+
+/// Applies a rule to existing uncategorized transactions. Returns the number
+/// of transactions updated.
+Future<int> applyRuleToExisting(SupabaseClient db, Rule rule) async {
+  final term = _orQuote(rule.pattern);
+  var q = db
+      .from('transactions')
+      .update({'category_id': rule.categoryId}).isFilter('category_id', null);
+  q = switch (rule.matchField) {
+    'merchant' => q.ilike('merchant_name', '%${rule.pattern}%'),
+    'description' => q.ilike('description', '%${rule.pattern}%'),
+    _ => q.or('merchant_name.ilike.$term,description.ilike.$term'),
+  };
+  final rows = await q.select('id');
+  return rows.length;
+}
+
+// --------------------------------------------------------------------- goals
+
+final goalsProvider = FutureProvider<List<Goal>>((ref) async {
+  final db = ref.watch(supabaseProvider);
+  final rows = await db.from('goals').select().order('created_at');
+  return rows.map(Goal.fromJson).toList();
+});
+
+Future<void> upsertGoal(
+  SupabaseClient db, {
+  String? id,
+  required String name,
+  required double targetAmount,
+  double savedAmount = 0,
+  String? accountId,
+  DateTime? targetDate,
+}) async {
+  final row = {
+    'user_id': _uid(db),
+    'name': name,
+    'target_amount': targetAmount,
+    'saved_amount': savedAmount,
+    'account_id': accountId,
+    'target_date': targetDate == null ? null : isoDate(targetDate),
+  };
+  if (id == null) {
+    await db.from('goals').insert(row);
+  } else {
+    await db.from('goals').update(row).eq('id', id);
+  }
+}
+
+Future<void> deleteGoal(SupabaseClient db, String id) async {
+  await db.from('goals').delete().eq('id', id);
+}
+
+// ---------------------------------------------------------------- snapshots
+
+/// Net-worth history, oldest first (last ~180 days).
+final snapshotsProvider = FutureProvider<List<BalanceSnapshot>>((ref) async {
+  final db = ref.watch(supabaseProvider);
+  final from = DateTime.now().subtract(const Duration(days: 180));
+  final rows = await db
+      .from('balance_snapshots')
+      .select('date, total')
+      .gte('date', isoDate(from))
+      .order('date', ascending: true);
+  return rows.map(BalanceSnapshot.fromJson).toList();
+});
 
 // --------------------------------------------------------------- plaid calls
 
@@ -273,4 +408,6 @@ void refreshData(WidgetRef ref) {
   ref.invalidate(monthTxnsProvider);
   ref.invalidate(sixMonthTxnsProvider);
   ref.invalidate(budgetsProvider);
+  ref.invalidate(goalsProvider);
+  ref.invalidate(snapshotsProvider);
 }
