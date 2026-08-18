@@ -35,7 +35,7 @@ ThemeData moneeTheme(Brightness brightness) {
     colorScheme: scheme,
     scaffoldBackgroundColor: scheme.surface,
     textTheme: text,
-    cardTheme: CardTheme(
+    cardTheme: CardThemeData(
       color: dark ? MoneeColors.darkSurface : MoneeColors.lightSurface,
       elevation: 0,
       shape: RoundedRectangleBorder(

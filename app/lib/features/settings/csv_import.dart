@@ -41,7 +41,7 @@ String detectDelimiter(String text) {
   var best = ',';
   var bestCount = -1;
   for (final d in [',', ';', '\t']) {
-    final count = '$d'.allMatches(line).length;
+    final count = d.allMatches(line).length;
     if (count > bestCount) {
       best = d;
       bestCount = count;

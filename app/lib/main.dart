@@ -13,7 +13,7 @@ Future<void> main() async {
       'Thiếu --dart-define=SUPABASE_URL và SUPABASE_ANON_KEY');
   await Supabase.initialize(
     url: Env.supabaseUrl,
-    anonKey: Env.supabaseAnonKey,
+    publishableKey: Env.supabaseAnonKey, // legacy anon key works here too
   );
   runApp(const ProviderScope(child: MoneeApp()));
 }

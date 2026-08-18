@@ -1,5 +1,7 @@
 # Monee
 
+![CI](https://github.com/quyenanh198/Monee/actions/workflows/ci.yml/badge.svg?branch=main)
+
 Personal finance app — tracks US bank accounts via Plaid plus manual accounts.
 One Flutter codebase → desktop, Android APK (sideload), and web (Cloudflare Pages).
 Runs entirely on free tiers: Supabase + Plaid Trial + Cloudflare Pages.
