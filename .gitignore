@@ -10,6 +10,10 @@ app/linux/
 app/macos/
 app/windows/
 app/web/
+# flutter create artifacts (regenerated after clone, see docs/CONTEXT.md)
+app/.gitignore
+app/.metadata
+app/README.md
 
 # Supabase local
 supabase/.temp/
