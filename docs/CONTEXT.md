@@ -25,6 +25,7 @@ Theo dõi 2 tài khoản ngân hàng Mỹ qua Plaid + tài khoản/giao dịch n
 ```
 Monee/
 ├─ docs/superpowers/specs/2026-08-17-monee-mvp-design.md   # design đã duyệt
+├─ docs/flow.html                         # 4 sơ đồ flow: điều hướng, Plaid link, sync, bảo mật
 ├─ supabase/
 │  ├─ migrations/
 │  │  ├─ 20260817000000_init.sql          # schema + RLS + index + grants
