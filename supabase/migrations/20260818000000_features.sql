@@ -88,13 +88,20 @@ alter table transactions add column parent_txn_id uuid
 create index idx_txn_parent on transactions (parent_txn_id)
   where parent_txn_id is not null;
 
--- A split child must reference a parent owned by the same user, and a child
--- cannot itself be split (single-level splits only). Enforced by trigger —
--- an RLS with-check subquery cannot express "no grandchildren" cleanly.
+-- A split child must reference a parent owned by the same user, and splits
+-- are single-level: a child cannot be split again, a row with children
+-- cannot become a child, and a row cannot parent itself. Enforced by
+-- trigger — an RLS with-check subquery cannot express this cleanly.
+-- SECURITY INVOKER on purpose: the parent is the same user's row, so it is
+-- visible under RLS, and a uniform error avoids leaking whether some other
+-- user's transaction id exists.
 create or replace function check_txn_split() returns trigger
-language plpgsql security definer set search_path = public as $$
+language plpgsql set search_path = public as $$
 begin
   if new.parent_txn_id is not null then
+    if new.parent_txn_id = new.id then
+      raise exception 'invalid parent_txn_id';
+    end if;
     if not exists (
       select 1 from transactions p
       where p.id = new.parent_txn_id
@@ -102,6 +109,11 @@ begin
         and p.parent_txn_id is null
     ) then
       raise exception 'invalid parent_txn_id';
+    end if;
+    if exists (
+      select 1 from transactions ch where ch.parent_txn_id = new.id
+    ) then
+      raise exception 'invalid parent_txn_id'; -- row already has children
     end if;
   end if;
   return new;
