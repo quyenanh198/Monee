@@ -18,14 +18,14 @@ final themeModeProvider =
 });
 
 class ThemeModeNotifier extends StateNotifier<ThemeMode> {
-  ThemeModeNotifier() : super(ThemeMode.dark) {
+  ThemeModeNotifier() : super(ThemeMode.light) {
     _load();
   }
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
     final v = prefs.getString(_themeKey);
-    if (v == 'light') state = ThemeMode.light;
+    if (v == 'dark') state = ThemeMode.dark;
     if (v == 'system') state = ThemeMode.system;
   }
 
@@ -58,9 +58,9 @@ class SettingsScreen extends ConsumerWidget {
                 trailing: SegmentedButton<ThemeMode>(
                   segments: const [
                     ButtonSegment(
-                        value: ThemeMode.dark, label: Text('Tối')),
-                    ButtonSegment(
                         value: ThemeMode.light, label: Text('Sáng')),
+                    ButtonSegment(
+                        value: ThemeMode.dark, label: Text('Tối')),
                     ButtonSegment(
                         value: ThemeMode.system, label: Text('Hệ thống')),
                   ],

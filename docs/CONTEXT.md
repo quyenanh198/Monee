@@ -62,8 +62,9 @@ Monee/
 - **Config client:** `--dart-define=SUPABASE_URL` + `--dart-define=SUPABASE_ANON_KEY`.
 - **Platform folders** (`android/`, `web/`, `windows/`...) không commit —
   chạy `flutter create . --platforms=web,windows,macos,linux,android` một lần sau khi clone.
-- **Theme:** Data-Dense Dashboard, dark mặc định. Primary `#1E40AF`, accent `#059669`,
-  destructive `#DC2626`, nền dark `#0F172A`. Font Fira Sans (UI) + Fira Code (số). Icon Lucide.
+- **Theme:** Data-Dense Dashboard, **light mặc định** (đổi từ dark 2026-08-18 theo yêu cầu user;
+  lựa chọn đã lưu của user vẫn được tôn trọng). Primary `#1E40AF`, accent `#059669`,
+  destructive `#DC2626`, nền light `#F1F5F9` / dark `#0F172A`. Font Fira Sans (UI) + Fira Code (số). Icon Lucide.
 - **RLS:** mọi bảng lọc theo `auth.uid() = user_id`; category hệ thống có `user_id null` (read-only).
 
 ## 4. Trạng thái
