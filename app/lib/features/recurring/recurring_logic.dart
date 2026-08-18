@@ -54,14 +54,19 @@ Cadence? _cadenceForGap(double days) {
   return null;
 }
 
-/// Detects recurring charges among [txns] (expenses only, split children
-/// excluded). Results are sorted by next due date.
-List<RecurringItem> detectRecurring(Iterable<Txn> txns) {
+/// Detects recurring charges among [txns] (split children excluded; income
+/// included only when [includeIncome] — its items carry negative amounts).
+/// Results are sorted by next due date.
+List<RecurringItem> detectRecurring(Iterable<Txn> txns,
+    {bool includeIncome = false}) {
   final groups = <String, List<Txn>>{};
   for (final t in txns) {
-    if (t.amount <= 0 || t.isSplitChild || t.isPending) continue;
-    final key = (t.merchantName ?? t.description ?? '').trim().toLowerCase();
-    if (key.isEmpty) continue;
+    if (t.amount == 0 || t.isSplitChild || t.isPending) continue;
+    if (!includeIncome && t.amount < 0) continue;
+    final name = (t.merchantName ?? t.description ?? '').trim().toLowerCase();
+    if (name.isEmpty) continue;
+    // Sign is part of the key so refunds don't pollute a charge's group.
+    final key = '${t.amount > 0 ? '+' : '-'}|$name';
     (groups[key] ??= []).add(t);
   }
 
@@ -106,3 +111,51 @@ List<RecurringItem> detectRecurring(Iterable<Txn> txns) {
 /// Total monthly cost of all recurring items.
 double totalMonthlyCost(Iterable<RecurringItem> items) =>
     items.fold(0.0, (s, i) => s + i.monthlyCost);
+
+DateTime _advance(DateTime d, Cadence c) => switch (c) {
+      Cadence.weekly => d.add(const Duration(days: 7)),
+      Cadence.monthly => DateTime(d.year, d.month + 1, d.day),
+      Cadence.yearly => DateTime(d.year + 1, d.month, d.day),
+    };
+
+/// Projects a balance over the next [days] days by replaying recurring
+/// charges (amount > 0 lowers the balance) and income (amount < 0 raises
+/// it) from their next due dates. Returns step points, first at [from] and
+/// last at the horizon.
+List<({DateTime date, double balance})> forecastBalance({
+  required double startBalance,
+  required Iterable<RecurringItem> items,
+  required DateTime from,
+  int days = 30,
+}) {
+  final start = DateTime(from.year, from.month, from.day);
+  final end = start.add(Duration(days: days));
+  final events = <({DateTime date, double amount})>[];
+  for (final it in items) {
+    var d = it.nextDue;
+    var guard = 0; // overdue items far in the past must not loop forever
+    while (d.isBefore(start) && guard++ < 200) {
+      d = _advance(d, it.cadence);
+    }
+    while (!d.isAfter(end) && guard++ < 200) {
+      events.add((date: d, amount: it.amount));
+      d = _advance(d, it.cadence);
+    }
+  }
+  events.sort((a, b) => a.date.compareTo(b.date));
+
+  var bal = startBalance;
+  final points = <({DateTime date, double balance})>[
+    (date: start, balance: bal),
+  ];
+  for (final e in events) {
+    bal -= e.amount;
+    points.add((date: e.date, balance: bal));
+  }
+  points.add((date: end, balance: bal));
+  return points;
+}
+
+/// Lowest projected balance in a forecast.
+double minForecastBalance(List<({DateTime date, double balance})> points) =>
+    points.fold(double.infinity, (m, p) => p.balance < m ? p.balance : m);

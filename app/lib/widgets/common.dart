@@ -29,8 +29,13 @@ class KpiCard extends StatelessWidget {
   final String label;
   final String value;
   final Color? valueColor;
+  final String? sub; // small line under the value (e.g. VND conversion)
   const KpiCard(
-      {super.key, required this.label, required this.value, this.valueColor});
+      {super.key,
+      required this.label,
+      required this.value,
+      this.valueColor,
+      this.sub});
 
   @override
   Widget build(BuildContext context) {
@@ -44,6 +49,10 @@ class KpiCard extends StatelessWidget {
             const SizedBox(height: 6),
             Text(value,
                 style: moneyStyle(context, size: 22, color: valueColor)),
+            if (sub != null) ...[
+              const SizedBox(height: 4),
+              Text(sub!, style: Theme.of(context).textTheme.bodySmall),
+            ],
           ],
         ),
       ),

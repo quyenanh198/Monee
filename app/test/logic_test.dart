@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:monee/features/budgets/budget_logic.dart';
 import 'package:monee/features/recurring/recurring_logic.dart';
 import 'package:monee/features/settings/csv_export.dart';
+import 'package:monee/features/settings/csv_import.dart';
 import 'package:monee/models/models.dart';
 
 Txn txn({
@@ -162,6 +163,134 @@ void main() {
         ...monthly('Spotify', 11.99),
       ]);
       expect(totalMonthlyCost(items), closeTo(27.48, 0.001));
+    });
+
+    test('includeIncome detects recurring income with negative amount', () {
+      final items = detectRecurring(
+        [
+          for (var m = 3; m <= 7; m++)
+            txn(
+                id: 'pay$m',
+                amount: -2450,
+                merchant: 'Payroll',
+                date: DateTime(2026, m, 15)),
+        ],
+        includeIncome: true,
+      );
+      expect(items.single.amount, -2450);
+      expect(items.single.cadence, Cadence.monthly);
+    });
+  });
+
+  group('forecastBalance', () {
+    test('replays charges and income as step events', () {
+      // lastDate 2026-08-10 → nextDue 2026-09-10 (inside 30-day window)
+      final rent = RecurringItem(
+          name: 'Rent',
+          categoryId: null,
+          amount: 800,
+          cadence: Cadence.monthly,
+          lastDate: DateTime(2026, 8, 10),
+          occurrences: 3);
+      final pay = RecurringItem(
+          name: 'Payroll',
+          categoryId: null,
+          amount: -1000,
+          cadence: Cadence.monthly,
+          lastDate: DateTime(2026, 8, 15),
+          occurrences: 3);
+
+      final points = forecastBalance(
+        startBalance: 500,
+        items: [rent, pay],
+        from: DateTime(2026, 8, 18),
+        days: 30,
+      );
+      expect(points.first.balance, 500);
+      final afterRent =
+          points.firstWhere((p) => p.date == DateTime(2026, 9, 10));
+      expect(afterRent.balance, -300); // 500 - 800
+      final afterPay =
+          points.firstWhere((p) => p.date == DateTime(2026, 9, 15));
+      expect(afterPay.balance, 700); // -300 + 1000
+      expect(points.last.balance, 700);
+      expect(minForecastBalance(points), -300);
+    });
+
+    test('overdue item is advanced into the window, not looped', () {
+      final old = RecurringItem(
+          name: 'Gym',
+          categoryId: null,
+          amount: 50,
+          cadence: Cadence.monthly,
+          lastDate: DateTime(2025, 1, 5),
+          occurrences: 5);
+      final points = forecastBalance(
+        startBalance: 100,
+        items: [old],
+        from: DateTime(2026, 8, 18),
+        days: 30,
+      );
+      // exactly one charge (2026-09-05) falls in the window
+      expect(points.last.balance, 50);
+    });
+  });
+
+  group('csv import', () {
+    test('parses quoted cells, CRLF and auto delimiter', () {
+      final rows = parseCsv(
+          'Date,Amount,Description\r\n'
+          '2026-08-01,-12.50,"Cafe ""Mơ"", Q1"\r\n'
+          '08/15/2026,"\$1,200.00",Rent\r\n');
+      expect(rows, hasLength(3));
+      expect(rows[1][2], 'Cafe "Mơ", Q1');
+      expect(rows[2][1], r'$1,200.00');
+
+      final semi = parseCsv('a;b;c\n1;2;3\n');
+      expect(semi[1], ['1', '2', '3']);
+    });
+
+    test('autoMap finds columns by header names', () {
+      final m = autoMap(['Posting Date', 'Description', 'Amount']);
+      expect(m, isNotNull);
+      expect(m!.dateCol, 0);
+      expect(m.amountCol, 2);
+      expect(m.descCol, 1);
+      expect(autoMap(['foo', 'bar']), isNull);
+    });
+
+    test('flexible dates: ISO, MM/dd/yyyy, dd/MM/yyyy disambiguated', () {
+      expect(parseFlexibleDate('2026-08-01'), DateTime(2026, 8, 1));
+      expect(parseFlexibleDate('08/15/2026'), DateTime(2026, 8, 15));
+      expect(parseFlexibleDate('15/08/2026'), DateTime(2026, 8, 15));
+      expect(parseFlexibleDate('not a date'), isNull);
+    });
+
+    test('amounts: currency symbols, thousands, parentheses negative', () {
+      expect(parseAmount(r'$1,234.56'), 1234.56);
+      expect(parseAmount('(12.50)'), -12.50);
+      expect(parseAmount('-3'), -3);
+      expect(parseAmount('abc'), isNull);
+    });
+
+    test('mapCsv skips bad rows and can invert sign', () {
+      final rows = [
+        ['2026-08-01', '-12.50', 'Coffee'],
+        ['bad date', '5', 'x'],
+        ['2026-08-02', '100', 'Salary refund'],
+      ];
+      final normal = mapCsv(rows,
+          const CsvMapping(dateCol: 0, amountCol: 1, descCol: 2));
+      expect(normal.txns, hasLength(2));
+      expect(normal.skipped, 1);
+      expect(normal.txns.first.amount, -12.50);
+
+      final inverted = mapCsv(rows,
+          const CsvMapping(
+              dateCol: 0, amountCol: 1, descCol: 2, invertSign: true));
+      // bank convention (negative = out) flipped to app convention
+      expect(inverted.txns.first.amount, 12.50);
+      expect(inverted.txns.first.description, 'Coffee');
     });
   });
 

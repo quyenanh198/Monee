@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/fx.dart';
 import '../../data/repositories.dart';
 import '../../models/models.dart';
 import 'csv_export.dart';
@@ -68,12 +69,19 @@ class SettingsScreen extends ConsumerWidget {
                       ref.read(themeModeProvider.notifier).set(s.first),
                 ),
               ),
+              _VndTile(),
               ListTile(
                 leading: const Icon(LucideIcons.wand2),
                 title: const Text('Rules phân loại tự động'),
                 subtitle: const Text(
                     'Tự gán danh mục cho giao dịch mới theo merchant/mô tả'),
                 onTap: () => context.go('/settings/rules'),
+              ),
+              ListTile(
+                leading: const Icon(LucideIcons.fileUp),
+                title: const Text('Nhập CSV giao dịch'),
+                subtitle: const Text('Dán export từ ngân hàng / app cũ'),
+                onTap: () => context.go('/settings/import'),
               ),
               ListTile(
                 leading: const Icon(LucideIcons.fileDown),
@@ -119,5 +127,23 @@ class SettingsScreen extends ConsumerWidget {
     await Clipboard.setData(ClipboardData(text: csv));
     messenger.showSnackBar(SnackBar(
         content: Text('Đã sao chép ${txRows.length} giao dịch (CSV)')));
+  }
+}
+
+/// VND display-conversion toggle + current reference rate.
+class _VndTile extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final show = ref.watch(showVndProvider);
+    final rate = ref.watch(vndRateProvider).valueOrNull;
+    return SwitchListTile(
+      secondary: const Icon(LucideIcons.banknote),
+      title: const Text('Quy đổi sang VND'),
+      subtitle: Text(rate == null
+          ? 'Hiện giá trị ≈ ₫ cạnh tổng số dư'
+          : '1 USD ≈ ${vnd(1, rate)} (tham khảo, cập nhật hằng ngày)'),
+      value: show,
+      onChanged: (v) => ref.read(showVndProvider.notifier).set(v),
+    );
   }
 }

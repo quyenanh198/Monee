@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/formatters.dart';
+import '../../core/fx.dart';
 import '../../core/theme.dart';
 import '../../data/repositories.dart';
 import '../../models/models.dart';
@@ -59,10 +60,15 @@ class DashboardScreen extends ConsumerWidget {
               builder: (list) {
                 final total =
                     list.fold(0.0, (s, a) => s + a.currentBalance);
+                final showVnd = ref.watch(showVndProvider);
+                final rate =
+                    showVnd ? ref.watch(vndRateProvider).valueOrNull : null;
                 return Row(children: [
                   Expanded(
                       child: KpiCard(
-                          label: 'Tổng số dư', value: money(total))),
+                          label: 'Tổng số dư',
+                          value: money(total),
+                          sub: rate == null ? null : '≈ ${vnd(total, rate)}')),
                   const SizedBox(width: 12),
                   Expanded(
                     child: AsyncBody(

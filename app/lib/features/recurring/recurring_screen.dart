@@ -1,3 +1,4 @@
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -24,6 +25,8 @@ class RecurringScreen extends ConsumerWidget {
     final catNames = {
       for (final c in categories.valueOrNull ?? []) c.id: c.name
     };
+    final totalBalance = (ref.watch(accountsProvider).valueOrNull ?? [])
+        .fold(0.0, (s, a) => s + a.currentBalance);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Chi định kỳ')),
@@ -83,6 +86,11 @@ class RecurringScreen extends ConsumerWidget {
                 ]),
               ),
               const SizedBox(height: 12),
+              _ForecastCard(
+                startBalance: totalBalance,
+                items: detectRecurring(list, includeIncome: true),
+              ),
+              const SizedBox(height: 12),
               Text(
                 'Nhận diện tự động từ giao dịch 6 tháng gần nhất — chỉ mang '
                 'tính tham khảo.',
@@ -102,5 +110,89 @@ class RecurringScreen extends ConsumerWidget {
     if (days < 0) return 'quá hạn ${-days} ngày';
     if (days == 0) return 'hôm nay';
     return 'còn $days ngày · ${shortDate(due)}';
+  }
+}
+
+/// Balance rendering: negatives keep their minus sign (money() is for
+/// transaction amounts, whose sign convention is inverted).
+String _bal(double v) => '${v < 0 ? '-' : ''}${money(v.abs())}';
+
+/// 30-day balance projection from the detected recurring charges/income.
+class _ForecastCard extends StatelessWidget {
+  final double startBalance;
+  final List<RecurringItem> items;
+  const _ForecastCard({required this.startBalance, required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) return const SizedBox.shrink();
+    final points = forecastBalance(
+      startBalance: startBalance,
+      items: items,
+      from: DateTime.now(),
+    );
+    if (points.length < 3) return const SizedBox.shrink();
+    final minBal = minForecastBalance(points);
+    final start = points.first.date;
+    final color = minBal < 0
+        ? MoneeColors.destructive
+        : Theme.of(context).colorScheme.primary;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Dự báo số dư 30 ngày',
+              style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 4),
+          Text(
+            'Thấp nhất ${_bal(minBal)} · cuối kỳ ${_bal(points.last.balance)}',
+            style: TextStyle(
+                fontSize: 12.5,
+                color: minBal < 0 ? MoneeColors.destructive : null),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 120,
+            child: LineChart(
+              LineChartData(
+                gridData: const FlGridData(show: false),
+                titlesData: const FlTitlesData(
+                  leftTitles: AxisTitles(),
+                  topTitles: AxisTitles(),
+                  rightTitles: AxisTitles(),
+                  bottomTitles: AxisTitles(),
+                ),
+                borderData: FlBorderData(show: false),
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: [
+                      for (final p in points)
+                        FlSpot(
+                            p.date.difference(start).inDays.toDouble(),
+                            p.balance),
+                    ],
+                    color: color,
+                    barWidth: 2,
+                    isCurved: false,
+                    isStepLineChart: true,
+                    dotData: const FlDotData(show: false),
+                    belowBarData: BarAreaData(
+                        show: true, color: color.withValues(alpha: 0.10)),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text(shortDate(points.first.date),
+                style: Theme.of(context).textTheme.bodySmall),
+            Text(shortDate(points.last.date),
+                style: Theme.of(context).textTheme.bodySmall),
+          ]),
+        ]),
+      ),
+    );
   }
 }

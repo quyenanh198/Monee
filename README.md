@@ -11,9 +11,10 @@ Flutter (Riverpod · go_router · fl_chart · supabase_flutter)
 ```
 
 Features: Plaid sync + manual accounts · budgets with rollover ·
-auto-categorization rules · recurring-charge detection & upcoming bills ·
-net-worth history · savings goals · split transactions, notes & tags ·
-reports · CSV export · dark/light theme.
+auto-categorization rules · recurring-charge detection, upcoming bills &
+30-day cash-flow forecast · net-worth history · savings goals · split
+transactions, notes & tags · reports · CSV import/export · VND display
+conversion · dark/light theme.
 
 Design spec: `docs/superpowers/specs/2026-08-17-monee-mvp-design.md` ·
 Flow diagrams: `docs/flow.html`
@@ -31,10 +32,12 @@ Flow diagrams: `docs/flow.html`
    supabase functions deploy plaid-link
    supabase functions deploy plaid-sync --no-verify-jwt
    supabase functions deploy plaid-webhook --no-verify-jwt
+   supabase functions deploy fx-rate
    ```
    `plaid-sync` needs `--no-verify-jwt` because the pg_cron call carries no JWT;
    the function enforces auth itself (user JWT or `x-cron-secret`). Same for
-   `plaid-webhook` (called by Plaid).
+   `plaid-webhook` (called by Plaid). `fx-rate` serves the USD→VND display
+   rate (free key-less upstream: open.er-api.com).
 4. Set function secrets:
    ```bash
    supabase secrets set \
@@ -132,4 +135,6 @@ no native SDK). Finish the flow there, come back, press **Đã xong**.
 - Verify Plaid webhook JWS signatures in `plaid-webhook` (currently the payload is
   untrusted-by-design: only `item_id` is used, to re-sync an item we already own).
 - Periodic DB export (free tier has no automatic backups).
-- Multi-currency conversion, shared accounts, push notifications.
+- Full multi-currency accounting (display-only VND conversion is built in),
+  shared accounts, push notifications (needs a Firebase project), AI Q&A
+  (needs a paid LLM API key).

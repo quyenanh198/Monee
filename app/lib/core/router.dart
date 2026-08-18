@@ -13,6 +13,7 @@ import '../features/goals/goals_screen.dart';
 import '../features/recurring/recurring_screen.dart';
 import '../features/reports/reports_screen.dart';
 import '../features/rules/rules_screen.dart';
+import '../features/settings/import_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/shell/app_shell.dart';
 import '../features/transactions/transactions_screen.dart';
@@ -84,6 +85,8 @@ GoRouter buildRouter() {
             builder: (_, __) => const SettingsScreen(),
             routes: [
               GoRoute(path: 'rules', builder: (_, __) => const RulesScreen()),
+              GoRoute(
+                  path: 'import', builder: (_, __) => const ImportScreen()),
             ],
           ),
         ],
