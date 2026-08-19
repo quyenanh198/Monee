@@ -22,3 +22,4 @@ supabase/.branches/
 # Env / secrets
 .env
 *.env
+.env.deploy
