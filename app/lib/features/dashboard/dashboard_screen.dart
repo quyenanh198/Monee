@@ -13,6 +13,7 @@ import '../../widgets/common.dart';
 import '../budgets/budget_logic.dart';
 import '../recurring/recurring_logic.dart';
 import '../recurring/recurring_providers.dart';
+import '../transactions/transactions_screen.dart' show showTxnForm;
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -24,6 +25,8 @@ class DashboardScreen extends ConsumerWidget {
     final monthTxns = ref.watch(monthTxnsProvider(month));
     final recent = ref.watch(recentTxnsProvider);
     final catNames = ref.watch(categoryNamesProvider);
+    final accList = accounts.valueOrNull ?? [];
+    final catList = ref.watch(categoriesProvider).valueOrNull ?? [];
 
     return Scaffold(
       appBar: AppBar(
@@ -111,7 +114,12 @@ class DashboardScreen extends ConsumerWidget {
                   : Card(
                       child: Column(children: [
                         for (final t in txns)
-                          TxnTile(txn: t, categoryName: catNames[t.categoryId]),
+                          TxnTile(
+                            txn: t,
+                            categoryName: catNames[t.categoryId],
+                            onTap: () => showTxnForm(context, ref,
+                                accounts: accList, cats: catList, existing: t),
+                          ),
                       ]),
                     ),
             ),

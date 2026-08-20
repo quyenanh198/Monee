@@ -299,7 +299,14 @@ Future<void> showTxnForm(
             TextButton(
               onPressed: () async {
                 final nav = Navigator.of(ctx);
-                await deleteTxn(ref.read(supabaseProvider), existing.id);
+                final messenger = ScaffoldMessenger.of(ctx);
+                try {
+                  await deleteTxn(ref.read(supabaseProvider), existing.id);
+                } catch (e) {
+                  messenger
+                      .showSnackBar(SnackBar(content: Text('Lỗi xóa: $e')));
+                  return;
+                }
                 refreshData(ref);
                 nav.pop();
               },
@@ -313,29 +320,35 @@ Future<void> showTxnForm(
               final messenger = ScaffoldMessenger.of(ctx);
               final db = ref.read(supabaseProvider);
               final noteVal = note.text.trim().isEmpty ? null : note.text.trim();
-              if (plaidRow) {
-                await updateTxnMeta(db, existing.id,
-                    categoryId: categoryId, note: noteVal, tags: parseTags());
-              } else {
-                final raw = parseAmount(amount.text);
-                if (raw == null || raw <= 0) {
-                  messenger.showSnackBar(const SnackBar(
-                      content: Text('Số tiền không hợp lệ — chưa lưu')));
-                  return;
+              try {
+                if (plaidRow) {
+                  await updateTxnMeta(db, existing.id,
+                      categoryId: categoryId, note: noteVal, tags: parseTags());
+                } else {
+                  final raw = parseAmount(amount.text);
+                  if (raw == null || raw <= 0) {
+                    messenger.showSnackBar(const SnackBar(
+                        content: Text('Số tiền không hợp lệ — chưa lưu')));
+                    return;
+                  }
+                  await upsertManualTxn(
+                    db,
+                    id: existing?.id,
+                    accountId: accountId,
+                    amount: isExpense ? raw.abs() : -raw.abs(),
+                    date: date,
+                    description: description.text.trim().isEmpty
+                        ? null
+                        : description.text.trim(),
+                    categoryId: categoryId,
+                    note: noteVal,
+                    tags: parseTags(),
+                  );
                 }
-                await upsertManualTxn(
-                  db,
-                  id: existing?.id,
-                  accountId: accountId,
-                  amount: isExpense ? raw.abs() : -raw.abs(),
-                  date: date,
-                  description: description.text.trim().isEmpty
-                      ? null
-                      : description.text.trim(),
-                  categoryId: categoryId,
-                  note: noteVal,
-                  tags: parseTags(),
-                );
+              } catch (e) {
+                messenger
+                    .showSnackBar(SnackBar(content: Text('Lỗi lưu: $e')));
+                return; // giữ dialog mở để không mất dữ liệu vừa nhập
               }
               refreshData(ref);
               nav.pop();
