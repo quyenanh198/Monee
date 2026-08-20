@@ -9,13 +9,35 @@ import '../../data/repositories.dart';
 import '../../models/models.dart';
 import '../../widgets/common.dart';
 
-/// Nền tô nhẹ theo dòng tiền: vào = xanh lá chuối non nhạt, ra = xám nhạt.
-Color _txnTint(BuildContext context, Txn t) {
+/// Nền tô theo dòng tiền: vào = xanh dương nhạt, ra = xám nhạt.
+/// [alt] = true cho dòng chẵn trong một chuỗi cùng loại đứng liền nhau —
+/// so le 2 tone đậm/nhạt để mắt tách được từng dòng.
+Color _txnTint(BuildContext context, Txn t, {required bool alt}) {
   final dark = Theme.of(context).brightness == Brightness.dark;
   if (t.isExpense) {
-    return dark ? const Color(0x12FFFFFF) : const Color(0xFFF3F4F6);
+    if (dark) return alt ? const Color(0x1FFFFFFF) : const Color(0x0EFFFFFF);
+    return alt ? const Color(0xFFE9EBEE) : const Color(0xFFF5F6F8);
   }
-  return dark ? const Color(0x2E84CC16) : const Color(0xFFEAF5D9);
+  if (dark) return alt ? const Color(0x403B82F6) : const Color(0x243B82F6);
+  return alt ? const Color(0xFFD0E4F7) : const Color(0xFFE4F0FB);
+}
+
+/// Màu nền cho từng dòng của danh sách: reset tone ở đầu mỗi chuỗi cùng
+/// loại, đảo tone cho các dòng tiếp theo trong chuỗi.
+List<Color> _txnTints(BuildContext context, List<Txn> list) {
+  final tints = <Color>[];
+  bool? prevExpense;
+  var alt = false;
+  for (final t in list) {
+    if (t.isExpense == prevExpense) {
+      alt = !alt;
+    } else {
+      alt = false;
+      prevExpense = t.isExpense;
+    }
+    tints.add(_txnTint(context, t, alt: alt));
+  }
+  return tints;
 }
 
 class TransactionsScreen extends ConsumerWidget {
@@ -118,16 +140,21 @@ class TransactionsScreen extends ConsumerWidget {
                     children: [
                       Card(
                         clipBehavior: Clip.antiAlias,
-                        child: Column(children: [
-                          for (final t in list)
-                            TxnTile(
-                              txn: t,
-                              categoryName: catNames[t.categoryId],
-                              tileColor: _txnTint(context, t),
-                              onTap: () => showTxnForm(context, ref,
-                                  accounts: accList, cats: catList, existing: t),
-                            ),
-                        ]),
+                        child: Builder(builder: (context) {
+                          final tints = _txnTints(context, list);
+                          return Column(children: [
+                            for (var i = 0; i < list.length; i++)
+                              TxnTile(
+                                txn: list[i],
+                                categoryName: catNames[list[i].categoryId],
+                                tileColor: tints[i],
+                                onTap: () => showTxnForm(context, ref,
+                                    accounts: accList,
+                                    cats: catList,
+                                    existing: list[i]),
+                              ),
+                          ]);
+                        }),
                       ),
                       if (list.length >= pageSize)
                         Padding(
