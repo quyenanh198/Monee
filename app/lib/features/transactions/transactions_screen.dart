@@ -9,6 +9,15 @@ import '../../data/repositories.dart';
 import '../../models/models.dart';
 import '../../widgets/common.dart';
 
+/// Nền tô nhẹ theo dòng tiền: vào = xanh lá chuối non nhạt, ra = xám nhạt.
+Color _txnTint(BuildContext context, Txn t) {
+  final dark = Theme.of(context).brightness == Brightness.dark;
+  if (t.isExpense) {
+    return dark ? const Color(0x12FFFFFF) : const Color(0xFFF3F4F6);
+  }
+  return dark ? const Color(0x2E84CC16) : const Color(0xFFEAF5D9);
+}
+
 class TransactionsScreen extends ConsumerWidget {
   const TransactionsScreen({super.key});
 
@@ -108,11 +117,13 @@ class TransactionsScreen extends ConsumerWidget {
                     padding: const EdgeInsets.all(16),
                     children: [
                       Card(
+                        clipBehavior: Clip.antiAlias,
                         child: Column(children: [
                           for (final t in list)
                             TxnTile(
                               txn: t,
                               categoryName: catNames[t.categoryId],
+                              tileColor: _txnTint(context, t),
                               onTap: () => showTxnForm(context, ref,
                                   accounts: accList, cats: catList, existing: t),
                             ),

@@ -84,13 +84,20 @@ class TxnTile extends StatelessWidget {
   final Txn txn;
   final String? categoryName;
   final VoidCallback? onTap;
-  const TxnTile({super.key, required this.txn, this.categoryName, this.onTap});
+  final Color? tileColor; // nền phân biệt tiền vào/ra (trang Giao dịch)
+  const TxnTile(
+      {super.key,
+      required this.txn,
+      this.categoryName,
+      this.onTap,
+      this.tileColor});
 
   @override
   Widget build(BuildContext context) {
     final color = txn.isExpense ? null : MoneeColors.accent;
     return ListTile(
       onTap: onTap,
+      tileColor: tileColor,
       leading: Icon(
         txn.isExpense ? LucideIcons.arrowUpRight : LucideIcons.arrowDownLeft,
         color: color,
