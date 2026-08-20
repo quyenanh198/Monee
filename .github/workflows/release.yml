@@ -1,11 +1,19 @@
 name: Release
 
-# Push a tag like v0.1.0 (or run manually) to build the Android APK and the
-# Windows desktop package and attach both to a GitHub Release.
+# Push a tag like v0.1.0 — or run manually with a tag name (the release
+# action then creates that tag at the current commit) — to build the
+# Android APK and the Windows desktop package and attach both to a
+# GitHub Release. The manual path exists because some environments can
+# push branches but not tags.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (created at this commit if missing)"
+        required: true
+        default: v0.1.0
 
 env:
   # Client config baked into the builds. The publishable (anon) key is public
@@ -77,7 +85,7 @@ jobs:
     name: GitHub Release
     needs: [android, windows]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
     steps:
@@ -86,6 +94,7 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           files: |
             monee-android.apk
             monee-windows-x64.zip
