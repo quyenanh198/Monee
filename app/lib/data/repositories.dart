@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -488,6 +490,80 @@ class PlaidService {
 
 final plaidServiceProvider =
     Provider<PlaidService>((ref) => PlaidService(ref.watch(supabaseProvider)));
+
+/// Live refresh: one Realtime channel watches the signed-in user's rows and
+/// invalidates the matching providers, so a change made on the server (cron
+/// sync, another device, another tab) shows up in this session within ~1s
+/// without a manual refresh. Debounced: a sync inserting dozens of rows
+/// causes one reload, not dozens.
+///
+/// plaid_items is not on the realtime publication (its payload would leak
+/// access_token past the column grant), so connection-status banners still
+/// update via explicit refreshData after sync/link actions.
+final realtimeRefreshProvider = Provider<void>((ref) {
+  final db = ref.watch(supabaseProvider);
+  final uid = ref.watch(currentUserIdProvider);
+  if (uid == null) return;
+
+  Timer? debounce;
+  final pending = <String>{};
+
+  void flush() {
+    for (final table in pending) {
+      switch (table) {
+        case 'transactions':
+          ref.invalidate(transactionsProvider);
+          ref.invalidate(monthTxnsProvider);
+          ref.invalidate(sixMonthTxnsProvider);
+        case 'accounts':
+          ref.invalidate(accountsProvider);
+        case 'budgets':
+          ref.invalidate(budgetsProvider);
+        case 'goals':
+          ref.invalidate(goalsProvider);
+        case 'categories':
+          ref.invalidate(categoriesProvider);
+        case 'rules':
+          ref.invalidate(rulesProvider);
+        case 'balance_snapshots':
+          ref.invalidate(snapshotsProvider);
+      }
+    }
+    pending.clear();
+  }
+
+  void onChange(String table) {
+    pending.add(table);
+    debounce?.cancel();
+    debounce = Timer(const Duration(milliseconds: 800), flush);
+  }
+
+  final channel = db.channel('live-refresh');
+  for (final table in const [
+    'transactions',
+    'accounts',
+    'budgets',
+    'goals',
+    'categories',
+    'rules',
+    'balance_snapshots',
+  ]) {
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: table,
+      filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq, column: 'user_id', value: uid),
+      callback: (_) => onChange(table),
+    );
+  }
+  channel.subscribe();
+
+  ref.onDispose(() {
+    debounce?.cancel();
+    db.removeChannel(channel);
+  });
+});
 
 /// Invalidate everything money-related after a sync or edit.
 void refreshData(WidgetRef ref) {

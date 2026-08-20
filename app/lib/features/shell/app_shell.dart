@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+
+import '../../data/repositories.dart';
 
 const _tabs = [
   (path: '/dashboard', icon: LucideIcons.layoutDashboard, label: 'Tổng quan'),
@@ -10,7 +13,7 @@ const _tabs = [
   (path: '/settings', icon: LucideIcons.settings, label: 'Cài đặt'),
 ];
 
-class AppShell extends StatelessWidget {
+class AppShell extends ConsumerWidget {
   final Widget child;
   const AppShell({super.key, required this.child});
 
@@ -21,7 +24,9 @@ class AppShell extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Keeps the live-refresh Realtime channel alive for the whole session.
+    ref.watch(realtimeRefreshProvider);
     final wide = MediaQuery.sizeOf(context).width >= 900;
     final index = _index(context);
 
