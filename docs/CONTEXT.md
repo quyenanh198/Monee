@@ -82,12 +82,11 @@ Monee/
 - [x] Feature pack 2 (2026-08-18): import CSV (/settings/import), quy đổi VND (function `fx-rate` + toggle Settings), dự báo dòng tiền 30 ngày (màn Chi định kỳ) — deploy thêm `supabase functions deploy fx-rate`
 - [x] Verify local với Flutter 3.47.0: `flutter analyze` sạch + 26 test pass (đã sửa CardTheme→CardThemeData, anonKey→publishableKey)
 - [x] CI GitHub Actions (2026-08-18): 3 job — flutter analyze+test, deno check 5 functions, áp 4 migration lên Postgres 16 (shim `auth`/roles/publication ở `.github/ci/supabase_shim.sql`)
-- [ ] Verify local: `flutter create .` → `flutter pub get` → `flutter analyze` → `flutter test`; `deno check` cho 4 file functions
-- [ ] Tạo Supabase project + chạy 2 migration
-- [ ] Deploy 3 Edge Functions + set secrets (`PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV`, `CRON_SECRET`)
-- [ ] Đăng ký Plaid Trial plan, liên kết 2 bank thật
-- [ ] Setup cron SQL (README mục 1.5)
-- [ ] Deploy web lên Cloudflare Pages
+- [x] Supabase project `kjpueihlobpegkdultoj` (us-east-2, user tự tạo 2026-08-18) + 5 migration đã áp qua Management API (CLI 2.115.0 lỗi TLS qua proxy — dùng `POST /v1/projects/{ref}/database/query` thay thế, script mẫu trong nhật ký phiên)
+- [x] 4 Edge Functions deployed (multipart `POST /v1/projects/{ref}/functions/deploy`; `plaid-sync` + `plaid-webhook` verify_jwt=false) + 4 secrets đã set; smoke test pass (plaid-sync trả `{"synced":0}`, fx-rate trả tỉ giá thật)
+- [x] Cron `monee-daily-sync` 12:00 UTC (pg_cron + pg_net) — kiêm keep-alive
+- [x] Web deployed: **https://monee-3ee.pages.dev** (Cloudflare Pages project `monee`, wrangler cần `NODE_EXTRA_CA_CERTS=/root/.ccr/ca-bundle.crt` trong môi trường CCR). Build bằng publishable key (`sb_publishable_...`)
+- [ ] Plaid đang `sandbox` — đăng ký Trial/Production trên dashboard.plaid.com rồi đổi secret `PLAID_SECRET` + `PLAID_ENV=production` (Management API hoặc dashboard) để liên kết 2 bank thật
 - [ ] Build APK, cài lên điện thoại
 
 ## 5. Deferred có chủ đích (KHÔNG tự ý code)
@@ -105,6 +104,7 @@ Schema đã chừa chỗ, chỉ làm khi được yêu cầu:
 
 | Ngày | Phiên | Đã làm | Tiếp theo |
 |---|---|---|---|
+| 2026-08-20 | Claude Code | **DEPLOY XONG.** User điền token Supabase thật vào `.env.deploy.example` và commit (0c3b325) → đã trả về placeholder + cảnh báo rotate; user đã cấp token mới qua env var + mở network policy. Supabase CLI 2.115.0 (cả bản npm lẫn GitHub release) lỗi "Transport error" qua proxy CCR → deploy 100% qua Management API bằng python/curl (cần `User-Agent` không phải urllib mặc định, kẻo Cloudflare 1010): 5 migration qua `/database/query` (verify: 10 bảng, 12 category seed, RPC split_transaction), 4 functions qua `/functions/deploy` multipart (sync+webhook verify_jwt=false), 4 secrets, pg_cron `monee-daily-sync` 0 12 * * *. Smoke test: plaid-sync với x-cron-secret → `{"synced":0}`; fx-rate → rate 26126.87. Web build với publishable key → Cloudflare Pages project `monee` (tạo qua API, deploy bằng wrangler + `NODE_EXTRA_CA_CERTS`) → **https://monee-3ee.pages.dev** (HTTP 200). Credentials thật nằm trong `.env.deploy` local (gitignore) + env vars của environment | Đăng ký Plaid Trial → đổi PLAID_SECRET/PLAID_ENV=production; đăng ký user đầu trong app; build APK |
 | 2026-08-18 | Claude Code | Chuẩn bị deploy Supabase + Cloudflare Pages: cài Supabase CLI 2.115.0 + wrangler 4.124.0; `flutter create . --platforms=web`; build web lần đầu lộ blocker — `lucide_icons` 0.257 extend `IconData` final, dart2js từ chối → đổi sang `lucide_icons_flutter` (cùng API `LucideIcons.*`), `flutter build web --release` pass. Analyze sạch, 32 test pass. **Deploy thật đang chờ credentials từ user**: `SUPABASE_ACCESS_TOKEN` (tạo project, db push, deploy functions), `PLAID_CLIENT_ID`/`PLAID_SECRET`, `CLOUDFLARE_API_TOKEN` (+account id) — nên đưa qua env var của environment, không dán vào chat | Nhận credentials → supabase projects create + db push + deploy 5 functions (plaid-sync & plaid-webhook `--no-verify-jwt`) + set secrets + cron SQL; build web với dart-define thật; wrangler pages deploy |
 | 2026-08-17 | Claude chat | Chốt ý tưởng, stack, tên, schema; build toàn bộ MVP (30 file); commit local `2e300eb`; đóng gói `monee-repo.tar.gz` | Push GitHub qua Claude Code; verify flutter analyze/test |
 | 2026-08-17 | Claude Code | Review toàn bộ code; thêm `docs/CONTEXT.md`; push branch `claude/code-review-github-commit-nbquvb`. Phát hiện chính: (1) `plaid-link complete` không kiểm tra link_token thuộc về user gọi; (2) chuỗi search nội suy thẳng vào `.or()` PostgREST — dấu phẩy/ngoặc làm hỏng query; (3) `refreshData` không invalidate `_sixMonthTxnsProvider` (Reports bị stale sau khi sửa giao dịch); (4) xóa account Plaid để lại `plaid_items` mồ côi vẫn sync; (5) lỗi trong nút "Đã xong" của completeLink không được catch. Không phải blocker — chi tiết ở message phiên | Sửa các finding nếu muốn; verify flutter analyze/test; tạo Supabase project |
