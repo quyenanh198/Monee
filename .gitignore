@@ -19,6 +19,9 @@ app/README.md
 supabase/.temp/
 supabase/.branches/
 
+# Wrangler local state
+.wrangler/
+
 # Env / secrets
 .env
 *.env
