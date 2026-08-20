@@ -1,0 +1,97 @@
+name: Release
+
+# Push a tag like v0.1.0 (or run manually) to build the Android APK and the
+# Windows desktop package and attach both to a GitHub Release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  # Client config baked into the builds. The publishable (anon) key is public
+  # by design — it ships inside every client bundle; RLS guards the data.
+  SUPABASE_URL: https://kjpueihlobpegkdultoj.supabase.co
+  SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtqcHVlaWhsb2JwZWdrZHVsdG9qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcwOTMzMTUsImV4cCI6MjEwMjY2OTMxNX0.4VqYT5n_7vvbeILDmnOUU82W-tFYX5m2ASf1lzBwJQo
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.0
+          channel: stable
+          cache: true
+      # Platform folders are not committed (see docs/CONTEXT.md).
+      - run: flutter create . --platforms=android
+      - run: flutter pub get
+      - run: >
+          flutter build apk --release
+          --dart-define=SUPABASE_URL=${{ env.SUPABASE_URL }}
+          --dart-define=SUPABASE_ANON_KEY=${{ env.SUPABASE_ANON_KEY }}
+      - run: mv build/app/outputs/flutter-apk/app-release.apk
+          build/app/outputs/flutter-apk/monee-android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: monee-android
+          path: app/build/app/outputs/flutter-apk/monee-android.apk
+          if-no-files-found: error
+
+  windows:
+    name: Windows package
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.0
+          channel: stable
+          cache: true
+      - run: flutter create . --platforms=windows
+      - run: flutter pub get
+      - run: >
+          flutter build windows --release
+          --dart-define=SUPABASE_URL=${{ env.SUPABASE_URL }}
+          --dart-define=SUPABASE_ANON_KEY=${{ env.SUPABASE_ANON_KEY }}
+      - run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath monee-windows-x64.zip
+        shell: pwsh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: monee-windows
+          path: app/monee-windows-x64.zip
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            monee-android.apk
+            monee-windows-x64.zip
+          generate_release_notes: true
+          body: |
+            **Web:** https://monee-3ee.pages.dev
+
+            - `monee-android.apk` — Android sideload (bật "Install unknown apps", mở file để cài)
+            - `monee-windows-x64.zip` — giải nén rồi chạy `monee.exe`

@@ -6,17 +6,20 @@ Personal finance app — tracks US bank accounts via Plaid plus manual accounts.
 One Flutter codebase → desktop, Android APK (sideload), and web (Cloudflare Pages).
 Runs entirely on free tiers: Supabase + Plaid Trial + Cloudflare Pages.
 
+**Live web app:** https://monee-3ee.pages.dev ·
+**Windows / Android downloads:** [GitHub Releases](https://github.com/quyenanh198/Monee/releases)
+
 ```
 Flutter (Riverpod · go_router · fl_chart · supabase_flutter)
    └── Supabase: Auth · Postgres (RLS) · Realtime · Edge Functions
           └── Plaid: Hosted Link · /transactions/sync · webhook
 ```
 
-Features: Plaid sync + manual accounts · budgets with rollover ·
-auto-categorization rules · recurring-charge detection, upcoming bills &
-30-day cash-flow forecast · net-worth history · savings goals · split
-transactions, notes & tags · reports · CSV import/export · VND display
-conversion · dark/light theme.
+Features: Plaid sync + manual accounts · realtime cross-device updates ·
+budgets with rollover · auto-categorization rules · recurring-charge
+detection, upcoming bills & 30-day cash-flow forecast · net-worth history ·
+savings goals · split transactions, notes & tags · reports · CSV
+import/export · VND display conversion · dark/light theme.
 
 Design spec: `docs/superpowers/specs/2026-08-17-monee-mvp-design.md` ·
 Flow diagrams: `docs/flow.html`
@@ -24,11 +27,9 @@ Flow diagrams: `docs/flow.html`
 ## 1. Supabase setup
 
 1. Create a project at supabase.com (free tier).
-2. Apply migrations, in order, via SQL Editor or `supabase db push`:
-   - `supabase/migrations/20260817000000_init.sql`
-   - `supabase/migrations/20260817000001_seed_categories.sql`
-   - `supabase/migrations/20260817000002_security_hardening.sql`
-   - `supabase/migrations/20260818000000_features.sql`
+2. Apply every file in `supabase/migrations/` in filename order, via SQL
+   Editor or `supabase db push` (init → seed_categories → security_hardening
+   → features → sync_fixes → realtime_tables).
 3. Deploy Edge Functions:
    ```bash
    supabase functions deploy plaid-link
@@ -91,16 +92,31 @@ flutter analyze
 flutter test
 ```
 
-## 4. Builds
+## 4. Builds & releases
 
-**Android APK (sideload, free):**
+**Release packages (Windows + Android) — via GitHub Actions:** push a tag
+and `.github/workflows/release.yml` builds the Android APK (ubuntu runner)
+and the Windows zip (windows runner), then attaches both to a GitHub
+Release:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+# → https://github.com/quyenanh198/Monee/releases
+```
+
+The workflow bakes in the production `SUPABASE_URL`/`SUPABASE_ANON_KEY`
+(the publishable key is public by design — RLS guards the data). The APK is
+debug-signed — fine for sideloading; add a keystore only if you ever ship
+to Play Store.
+
+**Android APK (local build):**
 ```bash
 flutter build apk --release \
   --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...
 # app/build/app/outputs/flutter-apk/app-release.apk → copy to phone, install
 ```
 
-**Desktop:**
+**Desktop (local build, needs that OS):**
 ```bash
 flutter build windows   # or: macos / linux — same --dart-define flags
 ```
@@ -109,10 +125,10 @@ flutter build windows   # or: macos / linux — same --dart-define flags
 ```bash
 flutter build web --release \
   --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...
-npx wrangler pages deploy app/build/web --project-name=monee
+npx wrangler pages deploy app/build/web --project-name=monee --branch=main
 ```
-(Or connect the repo in the Cloudflare dashboard with build command
-`cd app && flutter build web --release --dart-define=...` and output dir `app/build/web`.)
+`--branch=main` matters: wrangler otherwise infers the git branch and the
+deploy lands on a preview URL instead of production.
 
 ## 5. Linking a bank
 
