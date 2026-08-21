@@ -13,6 +13,10 @@ import '../budgets/budget_logic.dart';
 /// Report period: this month vs this calendar year.
 final _yearModeProvider = StateProvider<bool>((_) => false);
 
+/// The month shown in month mode (‹ › navigation).
+final _reportMonthProvider =
+    StateProvider<DateTime>((_) => monthStart(DateTime.now()));
+
 class ReportsScreen extends ConsumerWidget {
   const ReportsScreen({super.key});
 
@@ -61,37 +65,68 @@ class ReportsScreen extends ConsumerWidget {
               m: monthTotals(list.where(
                   (t) => t.date.year == m.year && t.date.month == m.month)),
           };
-          final thisMonth = monthStart(now);
-          final t = byMonth[thisMonth]!;
+          final selMonth = ref.watch(_reportMonthProvider);
+          final selTotals = monthTotals(list.where((x) =>
+              x.date.year == selMonth.year && x.date.month == selMonth.month));
 
           // Period scope for the category donut/top list.
           final periodTxns = yearMode
               ? list.where((x) => x.date.year == now.year).toList()
               : list
                   .where((x) =>
-                      x.date.year == thisMonth.year &&
-                      x.date.month == thisMonth.month)
+                      x.date.year == selMonth.year &&
+                      x.date.month == selMonth.month)
                   .toList();
           final periodLabel =
-              yearMode ? 'năm ${now.year}' : 'tháng ${monthLabel(thisMonth)}';
+              yearMode ? 'năm ${now.year}' : 'tháng ${monthLabel(selMonth)}';
 
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              if (!yearMode)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Row(children: [
+                    Text(monthLabel(selMonth),
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700)),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(LucideIcons.chevronLeft),
+                      onPressed: () => ref
+                          .read(_reportMonthProvider.notifier)
+                          .update((m) => addMonths(m, -1)),
+                    ),
+                    IconButton(
+                      icon: const Icon(LucideIcons.chevronRight),
+                      onPressed: selMonth.isBefore(monthStart(now))
+                          ? () => ref
+                              .read(_reportMonthProvider.notifier)
+                              .update((m) => addMonths(m, 1))
+                          : null,
+                    ),
+                  ]),
+                ),
               _NetWorthCard(snapshots: snapshots.valueOrNull ?? []),
               Row(children: [
                 Expanded(
                   child: KpiCard(
-                    label: 'Thu tháng này',
-                    value: money(t.income),
+                    label: 'Thu ${yearMode ? 'năm nay' : monthLabel(selMonth)}',
+                    value: money(yearMode
+                        ? monthTotals(periodTxns).income
+                        : selTotals.income),
                     valueColor: MoneeColors.accent,
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: KpiCard(
-                    label: 'Chi tháng này',
-                    value: money(t.expense),
+                    label: 'Chi ${yearMode ? 'năm nay' : monthLabel(selMonth)}',
+                    value: money(yearMode
+                        ? monthTotals(periodTxns).expense
+                        : selTotals.expense),
                     valueColor: MoneeColors.destructive,
                   ),
                 ),
@@ -110,7 +145,27 @@ class ReportsScreen extends ConsumerWidget {
                 categories: categories.valueOrNull ?? [],
               ),
               const SizedBox(height: 16),
-              _SpendingInsight(byMonth: byMonth, months: months),
+              LayoutBuilder(builder: (context, c) {
+                final insights = [
+                  _SpendingInsight(byMonth: byMonth, months: months),
+                  _BudgetTip(month: selMonth, txns: periodTxns),
+                ];
+                if (c.maxWidth >= 640) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: insights[0]),
+                      const SizedBox(width: 12),
+                      Expanded(child: insights[1]),
+                    ],
+                  );
+                }
+                return Column(children: [
+                  insights[0],
+                  const SizedBox(height: 12),
+                  insights[1],
+                ]);
+              }),
             ],
           );
         },
@@ -171,6 +226,19 @@ class _NetWorthCard extends StatelessWidget {
                       topTitles: AxisTitles(),
                       rightTitles: AxisTitles(),
                       bottomTitles: AxisTitles(),
+                    ),
+                    lineTouchData: LineTouchData(
+                      touchTooltipData: LineTouchTooltipData(
+                        getTooltipItems: (spots) => [
+                          for (final s in spots)
+                            LineTooltipItem(
+                                money(s.y),
+                                const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12)),
+                        ],
+                      ),
                     ),
                     borderData: FlBorderData(show: false),
                     lineBarsData: [
@@ -257,8 +325,17 @@ class _SpendingDonut extends StatelessWidget {
                         PieChartSectionData(
                           value: e.value,
                           color: categoryColor(e.key),
-                          showTitle: false,
-                          radius: 32,
+                          // % on the slice, like the mockup — only where
+                          // the slice is big enough to hold the label.
+                          showTitle: e.value / total >= 0.08,
+                          title:
+                              '${(e.value / total * 100).toStringAsFixed(0)}%',
+                          titleStyle: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white),
+                          titlePositionPercentageOffset: 0.55,
+                          radius: 34,
                         ),
                     ],
                   ),
@@ -531,6 +608,62 @@ class _SpendingInsight extends StatelessWidget {
                 lower
                     ? 'Bạn chi ít hơn ${pct.abs().toStringAsFixed(0)}% so với tháng trước. Rất tốt!'
                     : 'Chi tiêu đang cao hơn ${pct.abs().toStringAsFixed(0)}% so với tháng trước.',
+                style: TextStyle(fontSize: 13, color: mutedColor(context)),
+              ),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Budget tip (mockup): the category with the most budget left this month.
+class _BudgetTip extends ConsumerWidget {
+  final DateTime month;
+  final List<Txn> txns;
+  const _BudgetTip({required this.month, required this.txns});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final budgets = ref.watch(budgetsProvider(month)).valueOrNull ?? [];
+    if (budgets.isEmpty) return const SizedBox.shrink();
+    final catNames = ref.watch(categoryNamesProvider);
+    final spent = spentByCategory(txns);
+
+    Budget? best;
+    var bestLeft = 0.0;
+    for (final b in budgets) {
+      final left = b.amount - (spent[b.categoryId] ?? 0);
+      if (left > bestLeft) {
+        best = b;
+        bestLeft = left;
+      }
+    }
+    if (best == null) return const SizedBox.shrink();
+    final primary = Theme.of(context).colorScheme.primary;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              color: primary.withValues(alpha: 0.10),
+            ),
+            child: Icon(LucideIcons.piggyBank, size: 20, color: primary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Mẹo ngân sách',
+                  style: Theme.of(context).textTheme.titleSmall),
+              Text(
+                'Bạn còn ${money(bestLeft)} trong ngân sách '
+                '"${catNames[best.categoryId] ?? '?'}" tháng này.',
                 style: TextStyle(fontSize: 13, color: mutedColor(context)),
               ),
             ]),

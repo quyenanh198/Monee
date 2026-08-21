@@ -157,6 +157,35 @@ class TxnTile extends StatelessWidget {
   }
 }
 
+/// Small pill with a colored dot + category name (mockup-style chip).
+class CategoryChip extends StatelessWidget {
+  final String? categoryId;
+  final String? name;
+  const CategoryChip({super.key, required this.categoryId, required this.name});
+
+  @override
+  Widget build(BuildContext context) {
+    final key = categoryId ?? '';
+    final color = categoryColor(key);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 6),
+        Text(name ?? 'Chưa phân loại',
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+      ]),
+    );
+  }
+}
+
 /// Stable color per category for charts.
 Color categoryColor(String key) {
   const palette = [

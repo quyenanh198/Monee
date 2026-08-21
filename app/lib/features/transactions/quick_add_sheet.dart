@@ -55,7 +55,44 @@ class _QuickAddFormState extends State<_QuickAddForm> {
   bool isExpense = true;
   String? categoryId;
   late String accountId = widget.accounts.first.id;
+  late List<Category> cats = List.of(widget.cats);
   bool saving = false;
+
+  /// Minimal category management: add a new personal category.
+  Future<void> _manageCategories(BuildContext context) async {
+    final name = TextEditingController();
+    final added = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Thêm danh mục'),
+        content: TextField(
+          controller: name,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Tên danh mục'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Hủy')),
+          FilledButton(
+            onPressed: () async {
+              final nav = Navigator.of(ctx);
+              if (name.text.trim().isEmpty) return;
+              await createCategory(
+                  widget.ref.read(supabaseProvider), name.text.trim());
+              nav.pop(true);
+            },
+            child: const Text('Lưu'),
+          ),
+        ],
+      ),
+    );
+    if (added == true) {
+      widget.ref.invalidate(categoriesProvider);
+      final updated = await widget.ref.read(categoriesProvider.future);
+      if (mounted) setState(() => cats = updated);
+    }
+  }
 
   @override
   void dispose() {
@@ -150,13 +187,22 @@ class _QuickAddFormState extends State<_QuickAddForm> {
               onSelectionChanged: (s) => setState(() => isExpense = s.first),
             ),
             const SizedBox(height: 16),
-            Text('Danh mục', style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(
+                child: Text('Danh mục',
+                    style: Theme.of(context).textTheme.titleSmall),
+              ),
+              TextButton(
+                onPressed: () => _manageCategories(context),
+                child: const Text('Quản lý'),
+              ),
+            ]),
+            const SizedBox(height: 4),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final c in widget.cats)
+                for (final c in cats)
                   _CategoryCell(
                     name: c.name,
                     icon: categoryIcon(c.icon),

@@ -67,11 +67,13 @@ class TransactionsScreen extends ConsumerWidget {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        tooltip: 'Thêm giao dịch nhanh',
-        onPressed: () => showQuickAddSheet(context, ref),
-        child: const Icon(LucideIcons.plus),
-      ),
+      floatingActionButton: MediaQuery.sizeOf(context).width >= 900
+          ? null // wide screens use "+ Thêm" in the top bar
+          : FloatingActionButton(
+              tooltip: 'Thêm giao dịch nhanh',
+              onPressed: () => showQuickAddSheet(context, ref),
+              child: const Icon(LucideIcons.plus),
+            ),
       body: Column(children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),

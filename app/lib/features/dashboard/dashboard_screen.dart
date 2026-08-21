@@ -16,6 +16,16 @@ import '../recurring/recurring_providers.dart';
 import '../transactions/quick_add_sheet.dart';
 import '../transactions/transactions_screen.dart' show showTxnForm;
 
+Widget _legendDot(Color color, String label) =>
+    Row(mainAxisSize: MainAxisSize.min, children: [
+      Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+      const SizedBox(width: 5),
+      Text(label, style: const TextStyle(fontSize: 12)),
+    ]);
+
 String _greeting() {
   final h = DateTime.now().hour;
   if (h < 11) return 'Chào buổi sáng';
@@ -40,12 +50,16 @@ class DashboardScreen extends ConsumerWidget {
     final accList = accounts.valueOrNull ?? [];
     final sixMonth = ref.watch(sixMonthTxnsProvider).valueOrNull ?? [];
 
+    final wide = MediaQuery.sizeOf(context).width >= 900;
     return Scaffold(
-      floatingActionButton: FloatingActionButton(
-        tooltip: 'Thêm giao dịch nhanh',
-        onPressed: () => showQuickAddSheet(context, ref),
-        child: const Icon(LucideIcons.plus),
-      ),
+      // Wide screens already have "+ Thêm" in the top bar.
+      floatingActionButton: wide
+          ? null
+          : FloatingActionButton(
+              tooltip: 'Thêm giao dịch nhanh',
+              onPressed: () => showQuickAddSheet(context, ref),
+              child: const Icon(LucideIcons.plus),
+            ),
       body: RefreshIndicator(
         onRefresh: () async => refreshData(ref),
         child: ListView(
@@ -120,22 +134,35 @@ class DashboardScreen extends ConsumerWidget {
             const SizedBox(height: 4),
             AsyncBody(
               value: recent,
-              builder: (txns) => txns.isEmpty
-                  ? const EmptyState(
-                      'Chưa có giao dịch. Liên kết ngân hàng hoặc thêm tay.')
-                  : Card(
-                      clipBehavior: Clip.antiAlias,
-                      child: Column(children: [
-                        for (final t in txns)
-                          TxnTile(
-                            txn: t,
-                            categoryName: catNames[t.categoryId],
-                            categoryIconName: catIcons[t.categoryId],
-                            onTap: () => showTxnForm(context, ref,
-                                accounts: accList, cats: cats, existing: t),
-                          ),
-                      ]),
-                    ),
+              builder: (txns) {
+                if (txns.isEmpty) {
+                  return const EmptyState(
+                      'Chưa có giao dịch. Liên kết ngân hàng hoặc thêm tay.');
+                }
+                final wide = MediaQuery.sizeOf(context).width >= 900;
+                if (wide) {
+                  return _TxnTable(
+                    txns: txns,
+                    catNames: catNames,
+                    accountNames: {for (final a in accList) a.id: a.name},
+                    onTap: (t) => showTxnForm(context, ref,
+                        accounts: accList, cats: cats, existing: t),
+                  );
+                }
+                return Card(
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(children: [
+                    for (final t in txns)
+                      TxnTile(
+                        txn: t,
+                        categoryName: catNames[t.categoryId],
+                        categoryIconName: catIcons[t.categoryId],
+                        onTap: () => showTxnForm(context, ref,
+                            accounts: accList, cats: cats, existing: t),
+                      ),
+                  ]),
+                );
+              },
             ),
             const SizedBox(height: 80), // FAB clearance
           ],
@@ -145,7 +172,8 @@ class DashboardScreen extends ConsumerWidget {
   }
 }
 
-/// Gradient teal hero card: total USD balance + 30-day change from snapshots.
+/// Total-balance hero. Wide screens get the white card with a teal figure
+/// (desktop mockup); narrow screens keep the gradient card (mobile mockup).
 class _BalanceHero extends StatelessWidget {
   final List<Account> accounts;
   final List<BalanceSnapshot> snapshots;
@@ -170,6 +198,52 @@ class _BalanceHero extends StatelessWidget {
     if (snapshots.length >= 2 && snapshots.first.total != 0) {
       delta = snapshots.last.total - snapshots.first.total;
       pct = delta / snapshots.first.total.abs() * 100;
+    }
+
+    final wide = MediaQuery.sizeOf(context).width >= 900;
+    if (wide) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Text('Tổng số dư',
+                  style: TextStyle(fontSize: 14, color: mutedColor(context))),
+              const SizedBox(width: 6),
+              Icon(LucideIcons.eye, size: 14, color: mutedColor(context)),
+            ]),
+            const SizedBox(height: 6),
+            Text(money(total),
+                style: moneyStyle(context,
+                    size: 36,
+                    color: Theme.of(context).colorScheme.primary,
+                    weight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            Wrap(spacing: 12, runSpacing: 4, children: [
+              if (pct != null)
+                Text(
+                  '${delta! >= 0 ? '↑' : '↓'} ${money(delta.abs())} '
+                  '(${pct.abs().toStringAsFixed(2)}%) trong ${snapshots.length} ngày',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: delta >= 0
+                        ? MoneeColors.accent
+                        : MoneeColors.destructive,
+                  ),
+                ),
+              if (showVnd && vndRate != null)
+                Text('≈ ${vnd(total, vndRate!)}',
+                    style: TextStyle(
+                        fontSize: 13, color: mutedColor(context))),
+              if (hasForeign)
+                Text('chưa gồm tài khoản ngoại tệ',
+                    style: TextStyle(
+                        fontSize: 13, color: mutedColor(context))),
+            ]),
+          ]),
+        ),
+      );
     }
 
     return Container(
@@ -229,6 +303,103 @@ class _BalanceHero extends StatelessWidget {
   }
 }
 
+/// Desktop-style transaction table: Ngày | Mô tả | Danh mục | Tài khoản | Số tiền.
+class _TxnTable extends StatelessWidget {
+  final List<Txn> txns;
+  final Map<String, String> catNames;
+  final Map<String, String> accountNames;
+  final void Function(Txn) onTap;
+  const _TxnTable(
+      {required this.txns,
+      required this.catNames,
+      required this.accountNames,
+      required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final headStyle = TextStyle(
+        fontSize: 12.5,
+        fontWeight: FontWeight.w600,
+        color: mutedColor(context));
+    final border = Theme.of(context).brightness == Brightness.dark
+        ? MoneeColors.darkBorder
+        : MoneeColors.lightBorder;
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+          child: Row(children: [
+            SizedBox(width: 92, child: Text('Ngày', style: headStyle)),
+            Expanded(flex: 3, child: Text('Mô tả', style: headStyle)),
+            Expanded(flex: 2, child: Text('Danh mục', style: headStyle)),
+            Expanded(flex: 2, child: Text('Tài khoản', style: headStyle)),
+            SizedBox(
+              width: 110,
+              child: Text('Số tiền',
+                  textAlign: TextAlign.right, style: headStyle),
+            ),
+          ]),
+        ),
+        for (final t in txns) ...[
+          Container(height: 1, color: border),
+          InkWell(
+            onTap: () => onTap(t),
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(children: [
+                SizedBox(
+                  width: 92,
+                  child: Text(shortDate(t.date),
+                      style: const TextStyle(fontSize: 13)),
+                ),
+                Expanded(
+                  flex: 3,
+                  child: Text(t.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13.5)),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: CategoryChip(
+                        categoryId: t.categoryId,
+                        name: catNames[t.categoryId]),
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text(accountNames[t.accountId] ?? '—',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 13, color: mutedColor(context))),
+                ),
+                SizedBox(
+                  width: 110,
+                  child: Text(
+                    money(t.amount, currency: t.currency, signed: true),
+                    textAlign: TextAlign.right,
+                    style: moneyStyle(context,
+                        size: 13.5,
+                        color: t.isExpense
+                            ? MoneeColors.destructive
+                            : MoneeColors.accent),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+        ],
+      ]),
+    );
+  }
+}
+
 /// Horizontal strip of account cards.
 class _AccountsStrip extends StatelessWidget {
   final List<Account> accounts;
@@ -246,7 +417,10 @@ class _AccountsStrip extends StatelessWidget {
         itemBuilder: (context, i) {
           final a = accounts[i];
           return Card(
-            child: Container(
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: () => context.go('/dashboard/accounts'),
+              child: Container(
               width: 168,
               padding: const EdgeInsets.all(12),
               child:
@@ -277,6 +451,7 @@ class _AccountsStrip extends StatelessWidget {
                 Text(money(a.currentBalance, currency: a.currency),
                     style: moneyStyle(context, size: 16)),
               ]),
+              ),
             ),
           );
         },
@@ -285,7 +460,8 @@ class _AccountsStrip extends StatelessWidget {
   }
 }
 
-/// Cash flow for the last 30 days: cumulative net line + income/expense/net.
+/// Cash flow for the last 30 days: income vs expense lines (7-day rolling
+/// sum so single spikes still read as a curve) + income/expense/net footer.
 class _CashFlowCard extends StatelessWidget {
   final List<Txn> txns;
   const _CashFlowCard({required this.txns});
@@ -301,35 +477,68 @@ class _CashFlowCard extends StatelessWidget {
         .toList();
     if (window.isEmpty) return const SizedBox.shrink();
 
-    final perDay = List<double>.filled(30, 0);
+    final inDay = List<double>.filled(30, 0);
+    final outDay = List<double>.filled(30, 0);
     var income = 0.0, expense = 0.0;
     for (final t in window) {
       final i = t.date
           .difference(DateTime(from.year, from.month, from.day))
           .inDays;
       if (i < 0 || i > 29) continue;
-      perDay[i] -= t.amount; // amount>0 = money out → negative flow
       if (t.amount > 0) {
+        outDay[i] += t.amount;
         expense += t.amount;
       } else {
+        inDay[i] += -t.amount;
         income += -t.amount;
       }
     }
-    final spots = <FlSpot>[];
-    var running = 0.0;
-    for (var i = 0; i < 30; i++) {
-      running += perDay[i];
-      spots.add(FlSpot(i.toDouble(), running));
-    }
+    List<FlSpot> rolling(List<double> d) => [
+          for (var i = 0; i < 30; i++)
+            FlSpot(
+              i.toDouble(),
+              [
+                for (var j = i - 6 < 0 ? 0 : i - 6; j <= i; j++) d[j]
+              ].fold(0.0, (s, v) => s + v),
+            ),
+        ];
     final net = income - expense;
-    final primary = Theme.of(context).colorScheme.primary;
+
+    LineChartBarData line(List<FlSpot> spots, Color color) =>
+        LineChartBarData(
+          spots: spots,
+          color: color,
+          barWidth: 2,
+          isCurved: true,
+          curveSmoothness: 0.3,
+          preventCurveOverShooting: true,
+          dotData: const FlDotData(show: false),
+          belowBarData: BarAreaData(
+            show: true,
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                color.withValues(alpha: 0.14),
+                color.withValues(alpha: 0.0),
+              ],
+            ),
+          ),
+        );
 
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Dòng tiền (30 ngày)',
-              style: Theme.of(context).textTheme.titleMedium),
+          Row(children: [
+            Expanded(
+              child: Text('Dòng tiền (30 ngày)',
+                  style: Theme.of(context).textTheme.titleMedium),
+            ),
+            _legendDot(MoneeColors.accent, 'Thu'),
+            const SizedBox(width: 12),
+            _legendDot(MoneeColors.destructive, 'Chi'),
+          ]),
           const SizedBox(height: 12),
           SizedBox(
             height: 130,
@@ -342,28 +551,23 @@ class _CashFlowCard extends StatelessWidget {
                   rightTitles: AxisTitles(),
                   bottomTitles: AxisTitles(),
                 ),
+                lineTouchData: LineTouchData(
+                  touchTooltipData: LineTouchTooltipData(
+                    getTooltipItems: (spots) => [
+                      for (final s in spots)
+                        LineTooltipItem(
+                            money(s.y),
+                            TextStyle(
+                                color: s.bar.color ?? Colors.white,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12)),
+                    ],
+                  ),
+                ),
                 borderData: FlBorderData(show: false),
                 lineBarsData: [
-                  LineChartBarData(
-                    spots: spots,
-                    color: primary,
-                    barWidth: 2,
-                    isCurved: true,
-                    curveSmoothness: 0.25,
-                    preventCurveOverShooting: true,
-                    dotData: const FlDotData(show: false),
-                    belowBarData: BarAreaData(
-                      show: true,
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          primary.withValues(alpha: 0.20),
-                          primary.withValues(alpha: 0.0),
-                        ],
-                      ),
-                    ),
-                  ),
+                  line(rolling(inDay), MoneeColors.accent),
+                  line(rolling(outDay), MoneeColors.destructive),
                 ],
               ),
             ),
@@ -541,8 +745,16 @@ class _SpendDonut extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Chi tiêu theo danh mục',
-                    style: Theme.of(context).textTheme.titleMedium),
+                Row(children: [
+                  Expanded(
+                    child: Text('Chi tiêu theo danh mục',
+                        style: Theme.of(context).textTheme.titleMedium),
+                  ),
+                  TextButton(
+                    onPressed: () => context.go('/reports'),
+                    child: const Text('Xem báo cáo đầy đủ →'),
+                  ),
+                ]),
                 const SizedBox(height: 12),
                 SizedBox(
                   height: 180,
