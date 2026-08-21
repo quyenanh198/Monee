@@ -5,6 +5,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../core/formatters.dart';
 import '../../core/parsing.dart';
+import '../../core/theme.dart';
 import '../../data/repositories.dart';
 import '../../models/models.dart';
 import '../../widgets/common.dart';
@@ -67,7 +68,8 @@ class TransactionsScreen extends ConsumerWidget {
           ),
         ],
       ),
-      floatingActionButton: MediaQuery.sizeOf(context).width >= 900
+      floatingActionButton:
+          MediaQuery.sizeOf(context).width >= kWideBreakpoint
           ? null // wide screens use "+ Thêm" in the top bar
           : FloatingActionButton(
               tooltip: 'Thêm giao dịch nhanh',

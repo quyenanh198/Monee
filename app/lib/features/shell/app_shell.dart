@@ -30,7 +30,7 @@ class AppShell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     // Keeps the live-refresh Realtime channel alive for the whole session.
     ref.watch(realtimeRefreshProvider);
-    final wide = MediaQuery.sizeOf(context).width >= 900;
+    final wide = MediaQuery.sizeOf(context).width >= kWideBreakpoint;
     final index = _index(context);
 
     if (wide) {

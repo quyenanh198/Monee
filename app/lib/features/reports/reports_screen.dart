@@ -1,6 +1,7 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../core/formatters.dart';
@@ -143,6 +144,7 @@ class ReportsScreen extends ConsumerWidget {
               _TopCategories(
                 txns: periodTxns,
                 categories: categories.valueOrNull ?? [],
+                month: yearMode ? null : selMonth,
               ),
               const SizedBox(height: 16),
               LayoutBuilder(builder: (context, c) {
@@ -484,13 +486,16 @@ class _TrendsCard extends StatelessWidget {
 }
 
 /// Top spending categories as progress bars against the biggest one.
-class _TopCategories extends StatelessWidget {
+/// Tapping a row drills into Transactions filtered by that category.
+class _TopCategories extends ConsumerWidget {
   final List<Txn> txns;
   final List<Category> categories;
-  const _TopCategories({required this.txns, required this.categories});
+  final DateTime? month; // null = year scope (no month filter)
+  const _TopCategories(
+      {required this.txns, required this.categories, this.month});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final spent = spentByCategory(txns);
     if (spent.isEmpty) return const SizedBox.shrink();
     final names = {for (final c in categories) c.id: c.name};
@@ -508,7 +513,16 @@ class _TopCategories extends StatelessWidget {
               style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 12),
           for (final e in top)
-            Padding(
+            InkWell(
+              onTap: () {
+                ref.read(txnFilterProvider.notifier).update((f) => f.copyWith(
+                      categoryId: () => e.key.isEmpty ? null : e.key,
+                      month: () => month,
+                    ));
+                context.go('/transactions');
+              },
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: Row(children: [
                 Container(
@@ -560,6 +574,7 @@ class _TopCategories extends StatelessWidget {
                       ]),
                 ),
               ]),
+              ),
             ),
         ]),
       ),
@@ -667,6 +682,10 @@ class _BudgetTip extends ConsumerWidget {
                 style: TextStyle(fontSize: 13, color: mutedColor(context)),
               ),
             ]),
+          ),
+          TextButton(
+            onPressed: () => context.go('/budgets'),
+            child: const Text('Ngân sách'),
           ),
         ]),
       ),

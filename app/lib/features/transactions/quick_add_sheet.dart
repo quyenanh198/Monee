@@ -22,6 +22,24 @@ Future<void> showQuickAddSheet(BuildContext context, WidgetRef ref) async {
     return;
   }
 
+  final form = _QuickAddForm(
+      accounts: accounts, cats: cats, ref: ref, messenger: messenger);
+
+  // Spec §3: bottom sheet on mobile, centered modal on web/desktop.
+  if (MediaQuery.sizeOf(context).width >= kWideBreakpoint) {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: form,
+        ),
+      ),
+    );
+    return;
+  }
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
@@ -29,8 +47,7 @@ Future<void> showQuickAddSheet(BuildContext context, WidgetRef ref) async {
     constraints: const BoxConstraints(maxWidth: 520),
     shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-    builder: (ctx) => _QuickAddForm(
-        accounts: accounts, cats: cats, ref: ref, messenger: messenger),
+    builder: (ctx) => form,
   );
 }
 

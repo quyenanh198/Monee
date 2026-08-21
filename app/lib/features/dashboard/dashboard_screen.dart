@@ -50,7 +50,7 @@ class DashboardScreen extends ConsumerWidget {
     final accList = accounts.valueOrNull ?? [];
     final sixMonth = ref.watch(sixMonthTxnsProvider).valueOrNull ?? [];
 
-    final wide = MediaQuery.sizeOf(context).width >= 900;
+    final wide = MediaQuery.sizeOf(context).width >= kWideBreakpoint;
     return Scaffold(
       // Wide screens already have "+ Thêm" in the top bar.
       floatingActionButton: wide
@@ -112,14 +112,39 @@ class DashboardScreen extends ConsumerWidget {
               _AccountsStrip(accounts: accList),
             ],
             const SizedBox(height: 16),
-            _CashFlowCard(txns: sixMonth),
-            const SizedBox(height: 16),
-            _SpendDonut(monthTxns: monthTxns, catNames: catNames),
-            _UpcomingBills(items: ref.watch(recurringItemsProvider)),
-            _InsightCard(
-              thisMonth: monthTxns.valueOrNull ?? [],
-              lastMonth: lastMonthTxns.valueOrNull ?? [],
-            ),
+            // Responsive: two columns on wide screens, stacked on narrow.
+            LayoutBuilder(builder: (context, c) {
+              final cashFlow = _CashFlowCard(txns: sixMonth);
+              final donut =
+                  _SpendDonut(monthTxns: monthTxns, catNames: catNames);
+              final bills =
+                  _UpcomingBills(items: ref.watch(recurringItemsProvider));
+              final insight = _InsightCard(
+                thisMonth: monthTxns.valueOrNull ?? [],
+                lastMonth: lastMonthTxns.valueOrNull ?? [],
+              );
+              if (c.maxWidth >= 960) {
+                return Column(children: [
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Expanded(child: cashFlow),
+                    const SizedBox(width: 16),
+                    Expanded(child: donut),
+                  ]),
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Expanded(child: bills),
+                    const SizedBox(width: 16),
+                    Expanded(child: insight),
+                  ]),
+                ]);
+              }
+              return Column(children: [
+                cashFlow,
+                const SizedBox(height: 16),
+                donut,
+                bills,
+                insight,
+              ]);
+            }),
             const SizedBox(height: 16),
             Row(children: [
               Expanded(
@@ -139,7 +164,8 @@ class DashboardScreen extends ConsumerWidget {
                   return const EmptyState(
                       'Chưa có giao dịch. Liên kết ngân hàng hoặc thêm tay.');
                 }
-                final wide = MediaQuery.sizeOf(context).width >= 900;
+                final wide =
+                    MediaQuery.sizeOf(context).width >= kWideBreakpoint;
                 if (wide) {
                   return _TxnTable(
                     txns: txns,
@@ -172,9 +198,15 @@ class DashboardScreen extends ConsumerWidget {
   }
 }
 
-/// Total-balance hero. Wide screens get the white card with a teal figure
-/// (desktop mockup); narrow screens keep the gradient card (mobile mockup).
-class _BalanceHero extends StatelessWidget {
+/// Hidden-balance toggle (the "eye" on the hero card).
+final hideBalanceProvider = StateProvider<bool>((_) => false);
+
+/// Snapshot window for the hero delta badge: 7, 30, or 0 = all.
+final _heroPeriodProvider = StateProvider<int>((_) => 30);
+
+/// Signature gradient hero on every screen size (per the sample design):
+/// total balance, hide/show eye, period selector for the change badge.
+class _BalanceHero extends ConsumerWidget {
   final List<Account> accounts;
   final List<BalanceSnapshot> snapshots;
   final bool showVnd;
@@ -186,112 +218,129 @@ class _BalanceHero extends StatelessWidget {
       required this.vndRate});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final total = accounts
         .where((a) => a.currency == 'USD')
         .fold(0.0, (s, a) => s + a.currentBalance);
     final hasForeign = accounts.any((a) => a.currency != 'USD');
+    final hidden = ref.watch(hideBalanceProvider);
+    final period = ref.watch(_heroPeriodProvider);
 
-    // % change vs the oldest snapshot in the window (daily cron snapshots).
+    // Change over the selected snapshot window (daily cron snapshots).
+    final cutoff = DateTime.now().subtract(Duration(days: period));
+    final win = period == 0
+        ? snapshots
+        : snapshots.where((s) => !s.date.isBefore(cutoff)).toList();
     double? pct;
     double? delta;
-    if (snapshots.length >= 2 && snapshots.first.total != 0) {
-      delta = snapshots.last.total - snapshots.first.total;
-      pct = delta / snapshots.first.total.abs() * 100;
+    if (win.length >= 2 && win.first.total != 0) {
+      delta = win.last.total - win.first.total;
+      pct = delta / win.first.total.abs() * 100;
     }
 
-    final wide = MediaQuery.sizeOf(context).width >= 900;
-    if (wide) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Text('Tổng số dư',
-                  style: TextStyle(fontSize: 14, color: mutedColor(context))),
-              const SizedBox(width: 6),
-              Icon(LucideIcons.eye, size: 14, color: mutedColor(context)),
-            ]),
-            const SizedBox(height: 6),
-            Text(money(total),
-                style: moneyStyle(context,
-                    size: 36,
-                    color: Theme.of(context).colorScheme.primary,
-                    weight: FontWeight.w700)),
-            const SizedBox(height: 8),
-            Wrap(spacing: 12, runSpacing: 4, children: [
-              if (pct != null)
-                Text(
-                  '${delta! >= 0 ? '↑' : '↓'} ${money(delta.abs())} '
-                  '(${pct.abs().toStringAsFixed(2)}%) trong ${snapshots.length} ngày',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: delta >= 0
-                        ? MoneeColors.accent
-                        : MoneeColors.destructive,
-                  ),
-                ),
-              if (showVnd && vndRate != null)
-                Text('≈ ${vnd(total, vndRate!)}',
-                    style: TextStyle(
-                        fontSize: 13, color: mutedColor(context))),
-              if (hasForeign)
-                Text('chưa gồm tài khoản ngoại tệ',
-                    style: TextStyle(
-                        fontSize: 13, color: mutedColor(context))),
-            ]),
-          ]),
-        ),
-      );
-    }
-
+    final wide = MediaQuery.sizeOf(context).width >= kWideBreakpoint;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF0F766E), Color(0xFF14B8A6)],
-        ),
+        gradient: moneeGradient,
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          const Expanded(
+          const Flexible(
             child: Text('Tổng số dư',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: Colors.white70, fontSize: 14)),
           ),
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.white.withValues(alpha: 0.18),
-            ),
-            child:
-                const Icon(LucideIcons.wallet, size: 18, color: Colors.white),
+          const SizedBox(width: 4),
+          IconButton(
+            tooltip: hidden ? 'Hiện số dư' : 'Ẩn số dư',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            icon: Icon(hidden ? LucideIcons.eyeOff : LucideIcons.eye,
+                size: 16, color: Colors.white70),
+            onPressed: () =>
+                ref.read(hideBalanceProvider.notifier).update((v) => !v),
           ),
+          const Spacer(),
+          Theme(
+            data: Theme.of(context).copyWith(canvasColor: null),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<int>(
+                value: period,
+                dropdownColor: MoneeColors.primary,
+                iconEnabledColor: Colors.white70,
+                style: const TextStyle(color: Colors.white, fontSize: 12.5),
+                items: const [
+                  DropdownMenuItem(value: 7, child: Text('7 ngày')),
+                  DropdownMenuItem(value: 30, child: Text('30 ngày')),
+                  DropdownMenuItem(value: 0, child: Text('Tất cả')),
+                ],
+                onChanged: (v) => ref
+                    .read(_heroPeriodProvider.notifier)
+                    .state = v ?? 30,
+              ),
+            ),
+          ),
+          if (!wide) ...[
+            const SizedBox(width: 8),
+            InkWell(
+              onTap: () => context.go('/dashboard/accounts'),
+              borderRadius: BorderRadius.circular(999),
+              child: Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withValues(alpha: 0.18),
+                ),
+                child: const Icon(LucideIcons.wallet,
+                    size: 18, color: Colors.white),
+              ),
+            ),
+          ],
         ]),
         const SizedBox(height: 6),
-        Text(money(total),
+        Text(hidden ? '••••••' : money(total),
             style: moneyStyle(context,
-                size: 34, color: Colors.white, weight: FontWeight.w700)),
+                size: wide ? 38 : 34,
+                color: Colors.white,
+                weight: FontWeight.w700)),
         const SizedBox(height: 8),
         Wrap(spacing: 8, runSpacing: 4, children: [
-          if (pct != null)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.18),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                '${delta! >= 0 ? '↑' : '↓'} ${pct.abs().toStringAsFixed(1)}% trong ${snapshots.length} ngày',
-                style: const TextStyle(color: Colors.white, fontSize: 12.5),
+          if (pct != null && !hidden)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 290),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(
+                      delta! >= 0
+                          ? LucideIcons.trendingUp
+                          : LucideIcons.trendingDown,
+                      size: 12,
+                      color: Colors.white),
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      '${money(delta.abs())} (${pct.abs().toStringAsFixed(1)}%) '
+                      '${period == 0 ? 'từ đầu' : 'trong $period ngày'}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          const TextStyle(color: Colors.white, fontSize: 12.5),
+                    ),
+                  ),
+                ]),
               ),
             ),
-          if (showVnd && vndRate != null)
+          if (showVnd && vndRate != null && !hidden)
             Text('≈ ${vnd(total, vndRate!)}',
                 style: const TextStyle(color: Colors.white70, fontSize: 12.5)),
           if (hasForeign)
@@ -401,13 +450,14 @@ class _TxnTable extends StatelessWidget {
 }
 
 /// Horizontal strip of account cards.
-class _AccountsStrip extends StatelessWidget {
+class _AccountsStrip extends ConsumerWidget {
   final List<Account> accounts;
   const _AccountsStrip({required this.accounts});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final primary = Theme.of(context).colorScheme.primary;
+    final hidden = ref.watch(hideBalanceProvider);
     return SizedBox(
       height: 104,
       child: ListView.separated(
@@ -448,7 +498,10 @@ class _AccountsStrip extends StatelessWidget {
                   ),
                 ]),
                 const Spacer(),
-                Text(money(a.currentBalance, currency: a.currency),
+                Text(
+                    hidden
+                        ? '••••'
+                        : money(a.currentBalance, currency: a.currency),
                     style: moneyStyle(context, size: 16)),
               ]),
               ),
@@ -460,16 +513,24 @@ class _AccountsStrip extends StatelessWidget {
   }
 }
 
-/// Cash flow for the last 30 days: income vs expense lines (7-day rolling
-/// sum so single spikes still read as a curve) + income/expense/net footer.
-class _CashFlowCard extends StatelessWidget {
+/// Cash flow with a 7/30-day selector (spec): income vs expense lines
+/// (rolling sum so single spikes still read as a curve) + Thu/Chi/Ròng.
+class _CashFlowCard extends StatefulWidget {
   final List<Txn> txns;
   const _CashFlowCard({required this.txns});
 
   @override
+  State<_CashFlowCard> createState() => _CashFlowCardState();
+}
+
+class _CashFlowCardState extends State<_CashFlowCard> {
+  int days = 30;
+
+  @override
   Widget build(BuildContext context) {
+    final txns = widget.txns;
     final today = DateTime.now();
-    final from = today.subtract(const Duration(days: 29));
+    final from = today.subtract(Duration(days: days - 1));
     final window = effectiveTxns(txns)
         .where((t) =>
             t.currency == 'USD' &&
@@ -477,14 +538,14 @@ class _CashFlowCard extends StatelessWidget {
         .toList();
     if (window.isEmpty) return const SizedBox.shrink();
 
-    final inDay = List<double>.filled(30, 0);
-    final outDay = List<double>.filled(30, 0);
+    final inDay = List<double>.filled(days, 0);
+    final outDay = List<double>.filled(days, 0);
     var income = 0.0, expense = 0.0;
     for (final t in window) {
       final i = t.date
           .difference(DateTime(from.year, from.month, from.day))
           .inDays;
-      if (i < 0 || i > 29) continue;
+      if (i < 0 || i >= days) continue;
       if (t.amount > 0) {
         outDay[i] += t.amount;
         expense += t.amount;
@@ -493,12 +554,13 @@ class _CashFlowCard extends StatelessWidget {
         income += -t.amount;
       }
     }
+    final smooth = days >= 30 ? 6 : 2; // rolling window scales with range
     List<FlSpot> rolling(List<double> d) => [
-          for (var i = 0; i < 30; i++)
+          for (var i = 0; i < days; i++)
             FlSpot(
               i.toDouble(),
               [
-                for (var j = i - 6 < 0 ? 0 : i - 6; j <= i; j++) d[j]
+                for (var j = i - smooth < 0 ? 0 : i - smooth; j <= i; j++) d[j]
               ].fold(0.0, (s, v) => s + v),
             ),
         ];
@@ -532,12 +594,25 @@ class _CashFlowCard extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             Expanded(
-              child: Text('Dòng tiền (30 ngày)',
+              child: Text('Dòng tiền',
                   style: Theme.of(context).textTheme.titleMedium),
             ),
             _legendDot(MoneeColors.accent, 'Thu'),
             const SizedBox(width: 12),
             _legendDot(MoneeColors.destructive, 'Chi'),
+            const SizedBox(width: 12),
+            SegmentedButton<int>(
+              showSelectedIcon: false,
+              style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+              segments: const [
+                ButtonSegment(value: 7, label: Text('7d')),
+                ButtonSegment(value: 30, label: Text('30d')),
+              ],
+              selected: {days},
+              onSelectionChanged: (s) => setState(() => days = s.first),
+            ),
           ]),
           const SizedBox(height: 12),
           SizedBox(
@@ -658,6 +733,10 @@ class _InsightCard extends StatelessWidget {
                 ],
               ),
             ),
+            TextButton(
+              onPressed: () => context.go('/reports'),
+              child: const Text('Chi tiết'),
+            ),
           ]),
         ),
       ),
@@ -697,7 +776,9 @@ class _UpcomingBills extends StatelessWidget {
                 ),
               ]),
               for (final i in due)
-                Padding(
+                InkWell(
+                  onTap: () => context.go('/transactions/recurring'),
+                  child: Padding(
                   padding: const EdgeInsets.only(bottom: 8, right: 8),
                   child: Row(children: [
                     const Icon(LucideIcons.repeat, size: 16),
@@ -712,6 +793,7 @@ class _UpcomingBills extends StatelessWidget {
                     Text(money(i.amount),
                         style: moneyStyle(context, size: 13.5)),
                   ]),
+                  ),
                 ),
             ],
           ),
@@ -721,13 +803,23 @@ class _UpcomingBills extends StatelessWidget {
   }
 }
 
-class _SpendDonut extends StatelessWidget {
+class _SpendDonut extends ConsumerWidget {
   final AsyncValue<List<Txn>> monthTxns;
   final Map<String, String> catNames;
   const _SpendDonut({required this.monthTxns, required this.catNames});
 
+  /// Tapping a legend item drills into Transactions filtered by that
+  /// category for the current month.
+  void _drill(BuildContext context, WidgetRef ref, String categoryKey) {
+    ref.read(txnFilterProvider.notifier).update((f) => f.copyWith(
+          categoryId: () => categoryKey.isEmpty ? null : categoryKey,
+          month: () => monthStart(DateTime.now()),
+        ));
+    context.go('/transactions');
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return AsyncBody(
       value: monthTxns,
       builder: (txns) {
@@ -788,7 +880,10 @@ class _SpendDonut extends StatelessWidget {
                   runSpacing: 6,
                   children: [
                     for (final e in entries.take(6))
-                      ConstrainedBox(
+                      InkWell(
+                        onTap: () => _drill(context, ref, e.key),
+                        borderRadius: BorderRadius.circular(6),
+                        child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 300),
                         child: Row(mainAxisSize: MainAxisSize.min, children: [
                           Container(
@@ -806,6 +901,7 @@ class _SpendDonut extends StatelessWidget {
                             ),
                           ),
                         ]),
+                        ),
                       ),
                   ],
                 ),

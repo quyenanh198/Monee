@@ -99,6 +99,17 @@ TextStyle moneyStyle(BuildContext context,
   );
 }
 
+/// Signature teal gradient (hero cards, primary emphasis) — per the mockups.
+const moneeGradient = LinearGradient(
+  begin: Alignment.topLeft,
+  end: Alignment.bottomRight,
+  colors: [Color(0xFF0F766E), Color(0xFF14B8A6)],
+);
+
+/// Spec breakpoint: below this the app uses the mobile pattern
+/// (bottom navigation, bottom sheets); at or above it, sidebar + top bar.
+const kWideBreakpoint = 768.0;
+
 /// Secondary text color for the current theme.
 Color mutedColor(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
