@@ -80,35 +80,75 @@ class EmptyState extends StatelessWidget {
       );
 }
 
+/// Resolves the kebab-case icon names stored on categories to Lucide icons.
+IconData categoryIcon(String? name) => switch (name) {
+      'utensils' => LucideIcons.utensils,
+      'car' => LucideIcons.car,
+      'home' => LucideIcons.home,
+      'receipt' => LucideIcons.receipt,
+      'shopping-bag' => LucideIcons.shoppingBag,
+      'heart-pulse' => LucideIcons.heartPulse,
+      'clapperboard' => LucideIcons.clapperboard,
+      'plane' => LucideIcons.plane,
+      'graduation-cap' => LucideIcons.graduationCap,
+      'banknote' => LucideIcons.banknote,
+      'arrow-left-right' => LucideIcons.arrowLeftRight,
+      'circle-ellipsis' => LucideIcons.circleEllipsis,
+      'tag' => LucideIcons.tag,
+      _ => LucideIcons.circleDollarSign,
+    };
+
 class TxnTile extends StatelessWidget {
   final Txn txn;
   final String? categoryName;
+  final String? categoryIconName;
   final VoidCallback? onTap;
   final Color? tileColor; // nền phân biệt tiền vào/ra (trang Giao dịch)
   const TxnTile(
       {super.key,
       required this.txn,
       this.categoryName,
+      this.categoryIconName,
       this.onTap,
       this.tileColor});
 
   @override
   Widget build(BuildContext context) {
-    final color = txn.isExpense ? null : MoneeColors.accent;
+    final color =
+        txn.isExpense ? MoneeColors.destructive : MoneeColors.accent;
+    final iconBg = txn.isExpense
+        ? MoneeColors.destructive.withValues(alpha: 0.10)
+        : MoneeColors.accent.withValues(alpha: 0.12);
     return ListTile(
       onTap: onTap,
       tileColor: tileColor,
-      leading: Icon(
-        txn.isExpense ? LucideIcons.arrowUpRight : LucideIcons.arrowDownLeft,
-        color: color,
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: iconBg,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(
+          categoryIconName != null
+              ? categoryIcon(categoryIconName)
+              : (txn.isExpense
+                  ? LucideIcons.arrowUpRight
+                  : LucideIcons.arrowDownLeft),
+          size: 20,
+          color: color,
+        ),
       ),
       title: Text(txn.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text([
-        shortDate(txn.date),
-        if (categoryName != null) categoryName!,
-        if (txn.isPending) 'đang chờ',
-        if (txn.tags.isNotEmpty) txn.tags.map((t) => '#$t').join(' '),
-      ].join(' · ')),
+      subtitle: Text(
+        [
+          shortDate(txn.date),
+          if (categoryName != null) categoryName!,
+          if (txn.isPending) 'đang chờ',
+          if (txn.tags.isNotEmpty) txn.tags.map((t) => '#$t').join(' '),
+        ].join(' · '),
+        style: TextStyle(fontSize: 12.5, color: mutedColor(context)),
+      ),
       trailing: Text(
         money(txn.amount, currency: txn.currency, signed: true),
         style: moneyStyle(context, size: 15, color: color),

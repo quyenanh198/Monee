@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../data/repositories.dart';
+import '../settings/settings_screen.dart' show themeModeProvider;
 
 const _tabs = [
   (path: '/dashboard', icon: LucideIcons.layoutDashboard, label: 'Tổng quan'),
@@ -31,6 +32,7 @@ class AppShell extends ConsumerWidget {
     final index = _index(context);
 
     if (wide) {
+      final dark = Theme.of(context).brightness == Brightness.dark;
       return Scaffold(
         body: Row(
           children: [
@@ -38,6 +40,46 @@ class AppShell extends ConsumerWidget {
               selectedIndex: index,
               onDestinationSelected: (i) => context.go(_tabs[i].path),
               labelType: NavigationRailLabelType.all,
+              leading: Padding(
+                padding: const EdgeInsets.only(top: 8, bottom: 16),
+                child: Column(children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    child: Center(
+                      child: Text('M',
+                          style: TextStyle(
+                            color: dark ? const Color(0xFF0F172A) : Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 18,
+                          )),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text('Monee',
+                      style: TextStyle(
+                          fontSize: 11, fontWeight: FontWeight.w700)),
+                ]),
+              ),
+              trailing: Expanded(
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: IconButton(
+                      tooltip: dark ? 'Chuyển giao diện sáng' : 'Chuyển giao diện tối',
+                      icon: Icon(dark ? LucideIcons.sun : LucideIcons.moon),
+                      onPressed: () => ref
+                          .read(themeModeProvider.notifier)
+                          .set(dark ? ThemeMode.light : ThemeMode.dark),
+                    ),
+                  ),
+                ),
+              ),
               destinations: [
                 for (final t in _tabs)
                   NavigationRailDestination(
@@ -45,7 +87,14 @@ class AppShell extends ConsumerWidget {
               ],
             ),
             const VerticalDivider(width: 1),
-            Expanded(child: child),
+            Expanded(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1100),
+                  child: child,
+                ),
+              ),
+            ),
           ],
         ),
       );

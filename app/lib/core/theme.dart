@@ -1,32 +1,40 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// Design tokens — Data-Dense Dashboard style (ui-ux-pro-max).
+/// Design tokens — Minimal + Modern Finance (spec 2026-08-21).
 abstract final class MoneeColors {
-  static const primary = Color(0xFF1E40AF); // trust blue
-  static const secondary = Color(0xFF3B82F6);
-  static const accent = Color(0xFF059669); // profit green
-  static const destructive = Color(0xFFDC2626);
+  // Primary accent: teal.
+  static const primary = Color(0xFF0F766E); // teal-700 (light theme)
+  static const primaryDark = Color(0xFF2DD4BF); // teal-400 (dark theme)
+
+  // Semantic.
+  static const accent = Color(0xFF059669); // success / income
+  static const destructive = Color(0xFFDC2626); // danger / expense
+  static const warning = Color(0xFFD97706);
+
+  // Neutrals (spec token table).
+  static const lightBackground = Color(0xFFFFFFFF);
+  static const lightSurface = Color(0xFFF8FAFC); // card
+  static const lightBorder = Color(0xFFE2E8F0);
+  static const lightTextSecondary = Color(0xFF64748B);
   static const darkBackground = Color(0xFF0F172A);
-  static const darkSurface = Color(0xFF101A34);
-  static const darkBorder = Color(0x14FFFFFF); // white 8%
-  static const lightBackground = Color(0xFFF1F5F9); // slate-100
-  static const lightSurface = Colors.white;
-  static const lightBorder = Color(0x1F000000); // black 12%
+  static const darkSurface = Color(0xFF1E293B); // card
+  static const darkBorder = Color(0xFF334155);
+  static const darkTextSecondary = Color(0xFF94A3B8);
 }
 
 ThemeData moneeTheme(Brightness brightness) {
   final dark = brightness == Brightness.dark;
+  final primary = dark ? MoneeColors.primaryDark : MoneeColors.primary;
   final scheme = ColorScheme.fromSeed(
     seedColor: MoneeColors.primary,
     brightness: brightness,
-    primary: dark ? MoneeColors.secondary : MoneeColors.primary,
+    primary: primary,
     error: MoneeColors.destructive,
-    // Light mode: slate background so white cards read as elevated surfaces.
     surface: dark ? MoneeColors.darkBackground : MoneeColors.lightBackground,
   );
 
-  final text = GoogleFonts.firaSansTextTheme(
+  final text = GoogleFonts.interTextTheme(
     dark ? ThemeData.dark().textTheme : ThemeData.light().textTheme,
   );
 
@@ -39,30 +47,60 @@ ThemeData moneeTheme(Brightness brightness) {
       color: dark ? MoneeColors.darkSurface : MoneeColors.lightSurface,
       elevation: 0,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         side: BorderSide(
           color: dark ? MoneeColors.darkBorder : MoneeColors.lightBorder,
         ),
       ),
       margin: EdgeInsets.zero,
     ),
-    inputDecorationTheme: const InputDecorationTheme(
-      border: OutlineInputBorder(),
+    inputDecorationTheme: InputDecorationTheme(
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
       isDense: true,
     ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    ),
+    floatingActionButtonTheme: FloatingActionButtonThemeData(
+      backgroundColor: primary,
+      foregroundColor: dark ? MoneeColors.darkBackground : Colors.white,
+    ),
     navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: dark ? MoneeColors.darkSurface : MoneeColors.lightSurface,
-      indicatorColor: scheme.primary.withValues(alpha: 0.2),
+      backgroundColor: dark ? MoneeColors.darkSurface : Colors.white,
+      indicatorColor: primary.withValues(alpha: 0.15),
+    ),
+    navigationRailTheme: NavigationRailThemeData(
+      backgroundColor: dark ? MoneeColors.darkSurface : Colors.white,
+      indicatorColor: primary.withValues(alpha: 0.15),
+      selectedIconTheme: IconThemeData(color: primary),
+      selectedLabelTextStyle:
+          TextStyle(color: primary, fontWeight: FontWeight.w600, fontSize: 13),
+      unselectedLabelTextStyle: const TextStyle(fontSize: 13),
     ),
   );
 }
 
-/// Fira Code for figures — tabular, precise.
+/// Numbers: Inter semibold with tabular figures so columns line up.
 TextStyle moneyStyle(BuildContext context,
     {double? size, Color? color, FontWeight? weight}) {
-  return GoogleFonts.firaCode(
+  return GoogleFonts.inter(
     fontSize: size,
     color: color,
     fontWeight: weight ?? FontWeight.w600,
+    fontFeatures: const [FontFeature.tabularFigures()],
   );
 }
+
+/// Secondary text color for the current theme.
+Color mutedColor(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+        ? MoneeColors.darkTextSecondary
+        : MoneeColors.lightTextSecondary;

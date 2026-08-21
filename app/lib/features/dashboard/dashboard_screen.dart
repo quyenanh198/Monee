@@ -13,7 +13,16 @@ import '../../widgets/common.dart';
 import '../budgets/budget_logic.dart';
 import '../recurring/recurring_logic.dart';
 import '../recurring/recurring_providers.dart';
+import '../transactions/quick_add_sheet.dart';
 import '../transactions/transactions_screen.dart' show showTxnForm;
+
+String _greeting() {
+  final h = DateTime.now().hour;
+  if (h < 11) return 'Chào buổi sáng';
+  if (h < 14) return 'Chào buổi trưa';
+  if (h < 18) return 'Chào buổi chiều';
+  return 'Chào buổi tối';
+}
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -23,106 +32,112 @@ class DashboardScreen extends ConsumerWidget {
     final accounts = ref.watch(accountsProvider);
     final month = monthStart(DateTime.now());
     final monthTxns = ref.watch(monthTxnsProvider(month));
+    final lastMonthTxns = ref.watch(monthTxnsProvider(addMonths(month, -1)));
     final recent = ref.watch(recentTxnsProvider);
     final catNames = ref.watch(categoryNamesProvider);
+    final cats = ref.watch(categoriesProvider).valueOrNull ?? [];
+    final catIcons = {for (final c in cats) c.id: c.icon};
     final accList = accounts.valueOrNull ?? [];
-    final catList = ref.watch(categoriesProvider).valueOrNull ?? [];
+    final sixMonth = ref.watch(sixMonthTxnsProvider).valueOrNull ?? [];
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Tổng quan'),
-        actions: [
-          IconButton(
-            tooltip: 'Tài khoản',
-            icon: const Icon(LucideIcons.landmark),
-            onPressed: () => context.go('/dashboard/accounts'),
-          ),
-          IconButton(
-            tooltip: 'Đồng bộ ngân hàng',
-            icon: const Icon(LucideIcons.refreshCw),
-            onPressed: () async {
-              final messenger = ScaffoldMessenger.of(context);
-              try {
-                await ref.read(plaidServiceProvider).syncNow();
-                refreshData(ref);
-                messenger.showSnackBar(
-                    const SnackBar(content: Text('Đồng bộ xong')));
-              } catch (e) {
-                messenger.showSnackBar(SnackBar(content: Text('Lỗi: $e')));
-              }
-            },
-          ),
-        ],
+      floatingActionButton: FloatingActionButton(
+        tooltip: 'Thêm giao dịch nhanh',
+        onPressed: () => showQuickAddSheet(context, ref),
+        child: const Icon(LucideIcons.plus),
       ),
       body: RefreshIndicator(
         onRefresh: () async => refreshData(ref),
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            AsyncBody(
-              value: accounts,
-              builder: (list) {
-                // USD only — adding mixed currencies gives a meaningless sum.
-                final total = list
-                    .where((a) => a.currency == 'USD')
-                    .fold(0.0, (s, a) => s + a.currentBalance);
-                final hasForeign = list.any((a) => a.currency != 'USD');
-                final showVnd = ref.watch(showVndProvider);
-                final rate =
-                    showVnd ? ref.watch(vndRateProvider).valueOrNull : null;
-                final subParts = [
-                  if (rate != null) '≈ ${vnd(total, rate)}',
-                  if (hasForeign) 'chưa gồm tài khoản ngoại tệ',
-                ];
-                return Row(children: [
-                  Expanded(
-                      child: KpiCard(
-                          label: 'Tổng số dư',
-                          value: money(total),
-                          sub: subParts.isEmpty
-                              ? null
-                              : subParts.join(' · '))),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: AsyncBody(
-                      value: monthTxns,
-                      builder: (txns) {
-                        final t = monthTotals(txns);
-                        return KpiCard(
-                          label: 'Chi tháng ${monthLabel(month)}',
-                          value: money(t.expense),
-                          valueColor: MoneeColors.destructive,
-                        );
-                      },
-                    ),
-                  ),
-                ]);
-              },
+            Row(children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${_greeting()} 👋',
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.w700)),
+                    Text('Đây là tổng quan tài chính của bạn.',
+                        style: TextStyle(color: mutedColor(context))),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Tài khoản',
+                icon: const Icon(LucideIcons.landmark),
+                onPressed: () => context.go('/dashboard/accounts'),
+              ),
+              IconButton(
+                tooltip: 'Đồng bộ ngân hàng',
+                icon: const Icon(LucideIcons.refreshCw),
+                onPressed: () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  try {
+                    await ref.read(plaidServiceProvider).syncNow();
+                    refreshData(ref);
+                    messenger.showSnackBar(
+                        const SnackBar(content: Text('Đồng bộ xong')));
+                  } catch (e) {
+                    messenger
+                        .showSnackBar(SnackBar(content: Text('Lỗi: $e')));
+                  }
+                },
+              ),
+            ]),
+            const SizedBox(height: 16),
+            _BalanceHero(
+              accounts: accList,
+              snapshots: ref.watch(snapshotsProvider).valueOrNull ?? [],
+              showVnd: ref.watch(showVndProvider),
+              vndRate: ref.watch(vndRateProvider).valueOrNull,
             ),
+            if (accList.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _AccountsStrip(accounts: accList),
+            ],
+            const SizedBox(height: 16),
+            _CashFlowCard(txns: sixMonth),
             const SizedBox(height: 16),
             _SpendDonut(monthTxns: monthTxns, catNames: catNames),
             _UpcomingBills(items: ref.watch(recurringItemsProvider)),
+            _InsightCard(
+              thisMonth: monthTxns.valueOrNull ?? [],
+              lastMonth: lastMonthTxns.valueOrNull ?? [],
+            ),
             const SizedBox(height: 16),
-            Text('Giao dịch gần đây',
-                style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(
+                child: Text('Giao dịch gần đây',
+                    style: Theme.of(context).textTheme.titleMedium),
+              ),
+              TextButton(
+                onPressed: () => context.go('/transactions'),
+                child: const Text('Xem tất cả'),
+              ),
+            ]),
+            const SizedBox(height: 4),
             AsyncBody(
               value: recent,
               builder: (txns) => txns.isEmpty
                   ? const EmptyState(
                       'Chưa có giao dịch. Liên kết ngân hàng hoặc thêm tay.')
                   : Card(
+                      clipBehavior: Clip.antiAlias,
                       child: Column(children: [
                         for (final t in txns)
                           TxnTile(
                             txn: t,
                             categoryName: catNames[t.categoryId],
+                            categoryIconName: catIcons[t.categoryId],
                             onTap: () => showTxnForm(context, ref,
-                                accounts: accList, cats: catList, existing: t),
+                                accounts: accList, cats: cats, existing: t),
                           ),
                       ]),
                     ),
             ),
+            const SizedBox(height: 80), // FAB clearance
           ],
         ),
       ),
@@ -130,8 +145,323 @@ class DashboardScreen extends ConsumerWidget {
   }
 }
 
-/// Recurring charges due in the next 14 days (from recurringItemsProvider,
-/// computed once per data change — not per rebuild).
+/// Gradient teal hero card: total USD balance + 30-day change from snapshots.
+class _BalanceHero extends StatelessWidget {
+  final List<Account> accounts;
+  final List<BalanceSnapshot> snapshots;
+  final bool showVnd;
+  final double? vndRate;
+  const _BalanceHero(
+      {required this.accounts,
+      required this.snapshots,
+      required this.showVnd,
+      required this.vndRate});
+
+  @override
+  Widget build(BuildContext context) {
+    final total = accounts
+        .where((a) => a.currency == 'USD')
+        .fold(0.0, (s, a) => s + a.currentBalance);
+    final hasForeign = accounts.any((a) => a.currency != 'USD');
+
+    // % change vs the oldest snapshot in the window (daily cron snapshots).
+    double? pct;
+    double? delta;
+    if (snapshots.length >= 2 && snapshots.first.total != 0) {
+      delta = snapshots.last.total - snapshots.first.total;
+      pct = delta / snapshots.first.total.abs() * 100;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF0F766E), Color(0xFF14B8A6)],
+        ),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Expanded(
+            child: Text('Tổng số dư',
+                style: TextStyle(color: Colors.white70, fontSize: 14)),
+          ),
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white.withValues(alpha: 0.18),
+            ),
+            child:
+                const Icon(LucideIcons.wallet, size: 18, color: Colors.white),
+          ),
+        ]),
+        const SizedBox(height: 6),
+        Text(money(total),
+            style: moneyStyle(context,
+                size: 34, color: Colors.white, weight: FontWeight.w700)),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 4, children: [
+          if (pct != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                '${delta! >= 0 ? '↑' : '↓'} ${pct.abs().toStringAsFixed(1)}% trong ${snapshots.length} ngày',
+                style: const TextStyle(color: Colors.white, fontSize: 12.5),
+              ),
+            ),
+          if (showVnd && vndRate != null)
+            Text('≈ ${vnd(total, vndRate!)}',
+                style: const TextStyle(color: Colors.white70, fontSize: 12.5)),
+          if (hasForeign)
+            const Text('chưa gồm tài khoản ngoại tệ',
+                style: TextStyle(color: Colors.white70, fontSize: 12.5)),
+        ]),
+      ]),
+    );
+  }
+}
+
+/// Horizontal strip of account cards.
+class _AccountsStrip extends StatelessWidget {
+  final List<Account> accounts;
+  const _AccountsStrip({required this.accounts});
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return SizedBox(
+      height: 104,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: accounts.length,
+        separatorBuilder: (_, i) => const SizedBox(width: 10),
+        itemBuilder: (context, i) {
+          final a = accounts[i];
+          return Card(
+            child: Container(
+              width: 168,
+              padding: const EdgeInsets.all(12),
+              child:
+                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(9),
+                      color: primary.withValues(alpha: 0.10),
+                    ),
+                    child: Icon(
+                        a.isManual ? LucideIcons.wallet : LucideIcons.landmark,
+                        size: 15,
+                        color: primary),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(a.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w600)),
+                  ),
+                ]),
+                const Spacer(),
+                Text(money(a.currentBalance, currency: a.currency),
+                    style: moneyStyle(context, size: 16)),
+              ]),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Cash flow for the last 30 days: cumulative net line + income/expense/net.
+class _CashFlowCard extends StatelessWidget {
+  final List<Txn> txns;
+  const _CashFlowCard({required this.txns});
+
+  @override
+  Widget build(BuildContext context) {
+    final today = DateTime.now();
+    final from = today.subtract(const Duration(days: 29));
+    final window = effectiveTxns(txns)
+        .where((t) =>
+            t.currency == 'USD' &&
+            !t.date.isBefore(DateTime(from.year, from.month, from.day)))
+        .toList();
+    if (window.isEmpty) return const SizedBox.shrink();
+
+    final perDay = List<double>.filled(30, 0);
+    var income = 0.0, expense = 0.0;
+    for (final t in window) {
+      final i = t.date
+          .difference(DateTime(from.year, from.month, from.day))
+          .inDays;
+      if (i < 0 || i > 29) continue;
+      perDay[i] -= t.amount; // amount>0 = money out → negative flow
+      if (t.amount > 0) {
+        expense += t.amount;
+      } else {
+        income += -t.amount;
+      }
+    }
+    final spots = <FlSpot>[];
+    var running = 0.0;
+    for (var i = 0; i < 30; i++) {
+      running += perDay[i];
+      spots.add(FlSpot(i.toDouble(), running));
+    }
+    final net = income - expense;
+    final primary = Theme.of(context).colorScheme.primary;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Dòng tiền (30 ngày)',
+              style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 130,
+            child: LineChart(
+              LineChartData(
+                gridData: const FlGridData(show: false),
+                titlesData: const FlTitlesData(
+                  leftTitles: AxisTitles(),
+                  topTitles: AxisTitles(),
+                  rightTitles: AxisTitles(),
+                  bottomTitles: AxisTitles(),
+                ),
+                borderData: FlBorderData(show: false),
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: spots,
+                    color: primary,
+                    barWidth: 2,
+                    isCurved: true,
+                    curveSmoothness: 0.25,
+                    preventCurveOverShooting: true,
+                    dotData: const FlDotData(show: false),
+                    belowBarData: BarAreaData(
+                      show: true,
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          primary.withValues(alpha: 0.20),
+                          primary.withValues(alpha: 0.0),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(children: [
+            _flowStat(context, 'Thu', money(income), MoneeColors.accent),
+            _divider(context),
+            _flowStat(
+                context, 'Chi', money(expense), MoneeColors.destructive),
+            _divider(context),
+            _flowStat(context, 'Ròng', '${net < 0 ? '-' : ''}${money(net.abs())}',
+                net >= 0 ? MoneeColors.accent : MoneeColors.destructive),
+          ]),
+        ]),
+      ),
+    );
+  }
+
+  Widget _divider(BuildContext context) => Container(
+        width: 1,
+        height: 28,
+        margin: const EdgeInsets.symmetric(horizontal: 12),
+        color: Theme.of(context).brightness == Brightness.dark
+            ? MoneeColors.darkBorder
+            : MoneeColors.lightBorder,
+      );
+
+  Widget _flowStat(
+          BuildContext context, String label, String value, Color color) =>
+      Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label,
+              style: TextStyle(fontSize: 12, color: mutedColor(context))),
+          const SizedBox(height: 2),
+          Text(value, style: moneyStyle(context, size: 14.5, color: color)),
+        ]),
+      );
+}
+
+/// Simple rule-based insight: spending vs last month.
+class _InsightCard extends StatelessWidget {
+  final List<Txn> thisMonth;
+  final List<Txn> lastMonth;
+  const _InsightCard({required this.thisMonth, required this.lastMonth});
+
+  @override
+  Widget build(BuildContext context) {
+    final now = monthTotals(thisMonth).expense;
+    final prev = monthTotals(lastMonth).expense;
+    if (prev <= 0 || now <= 0) return const SizedBox.shrink();
+    final pct = ((now - prev) / prev * 100);
+    final lower = pct <= 0;
+    final color = lower ? MoneeColors.accent : MoneeColors.warning;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                color: color.withValues(alpha: 0.12),
+              ),
+              child: Icon(
+                  lower ? LucideIcons.trendingDown : LucideIcons.trendingUp,
+                  size: 20,
+                  color: color),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Insight chi tiêu',
+                      style: Theme.of(context).textTheme.titleSmall),
+                  Text(
+                    lower
+                        ? 'Bạn đang chi ít hơn ${pct.abs().toStringAsFixed(0)}% so với cùng kỳ tháng trước. Tiếp tục phát huy!'
+                        : 'Chi tiêu tháng này đang cao hơn ${pct.abs().toStringAsFixed(0)}% so với tháng trước.',
+                    style: TextStyle(
+                        fontSize: 13, color: mutedColor(context)),
+                  ),
+                ],
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// Recurring charges due in the next 14 days.
 class _UpcomingBills extends StatelessWidget {
   final List<RecurringItem> items;
   const _UpcomingBills({required this.items});
@@ -203,6 +533,7 @@ class _SpendDonut extends StatelessWidget {
         }
         final entries = spent.entries.toList()
           ..sort((a, b) => b.value.compareTo(a.value));
+        final total = entries.fold(0.0, (s, e) => s + e.value);
 
         return Card(
           child: Padding(
@@ -215,21 +546,29 @@ class _SpendDonut extends StatelessWidget {
                 const SizedBox(height: 12),
                 SizedBox(
                   height: 180,
-                  child: PieChart(
-                    PieChartData(
-                      centerSpaceRadius: 45,
-                      sectionsSpace: 2,
-                      sections: [
-                        for (final e in entries)
-                          PieChartSectionData(
-                            value: e.value,
-                            color: categoryColor(e.key),
-                            showTitle: false,
-                            radius: 40,
-                          ),
-                      ],
+                  child: Stack(alignment: Alignment.center, children: [
+                    PieChart(
+                      PieChartData(
+                        centerSpaceRadius: 52,
+                        sectionsSpace: 2,
+                        sections: [
+                          for (final e in entries)
+                            PieChartSectionData(
+                              value: e.value,
+                              color: categoryColor(e.key),
+                              showTitle: false,
+                              radius: 34,
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
+                    Column(mainAxisSize: MainAxisSize.min, children: [
+                      Text(money(total), style: moneyStyle(context, size: 17)),
+                      Text('Tổng',
+                          style: TextStyle(
+                              fontSize: 12, color: mutedColor(context))),
+                    ]),
+                  ]),
                 ),
                 const SizedBox(height: 12),
                 Wrap(
@@ -237,17 +576,25 @@ class _SpendDonut extends StatelessWidget {
                   runSpacing: 6,
                   children: [
                     for (final e in entries.take(6))
-                      Row(mainAxisSize: MainAxisSize.min, children: [
-                        Container(
-                            width: 10,
-                            height: 10,
-                            decoration: BoxDecoration(
-                                color: categoryColor(e.key),
-                                shape: BoxShape.circle)),
-                        const SizedBox(width: 6),
-                        Text(
-                            '${e.key.isEmpty ? 'Chưa phân loại' : catNames[e.key] ?? '?'} · ${money(e.value)}'),
-                      ]),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 300),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Container(
+                              width: 10,
+                              height: 10,
+                              decoration: BoxDecoration(
+                                  color: categoryColor(e.key),
+                                  shape: BoxShape.circle)),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              '${e.key.isEmpty ? 'Chưa phân loại' : catNames[e.key] ?? '?'} · ${money(e.value)}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ]),
+                      ),
                   ],
                 ),
               ],

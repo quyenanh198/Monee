@@ -8,6 +8,7 @@ import '../../core/parsing.dart';
 import '../../data/repositories.dart';
 import '../../models/models.dart';
 import '../../widgets/common.dart';
+import 'quick_add_sheet.dart';
 
 /// Nền tô theo dòng tiền: vào = xanh dương nhạt, ra = xám nhạt.
 /// [alt] = true cho dòng chẵn trong một chuỗi cùng loại đứng liền nhau —
@@ -67,10 +68,8 @@ class TransactionsScreen extends ConsumerWidget {
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        tooltip: 'Thêm giao dịch',
-        onPressed: accList.isEmpty
-            ? null
-            : () => showTxnForm(context, ref, accounts: accList, cats: catList),
+        tooltip: 'Thêm giao dịch nhanh',
+        onPressed: () => showQuickAddSheet(context, ref),
         child: const Icon(LucideIcons.plus),
       ),
       body: Column(children: [
@@ -142,11 +141,15 @@ class TransactionsScreen extends ConsumerWidget {
                         clipBehavior: Clip.antiAlias,
                         child: Builder(builder: (context) {
                           final tints = _txnTints(context, list);
+                          final catIcons = {
+                            for (final c in catList) c.id: c.icon
+                          };
                           return Column(children: [
                             for (var i = 0; i < list.length; i++)
                               TxnTile(
                                 txn: list[i],
                                 categoryName: catNames[list[i].categoryId],
+                                categoryIconName: catIcons[list[i].categoryId],
                                 tileColor: tints[i],
                                 onTap: () => showTxnForm(context, ref,
                                     accounts: accList,
